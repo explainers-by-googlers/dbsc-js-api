@@ -324,6 +324,8 @@ Implementors and other stakeholders did not publicly state positions on this wor
 
 Many thanks for valuable feedback and advice from:
 
+- Amr Aboelkher
 - Arnar Birgisson [@arnar](https://github.com/arnar)
+- Daniel Margolis
 - Daniel Rubery [@drubery](https://github.com/drubery)
 - Lucas Santos [@lucasrsant](https://github.com/lucasrsant)
