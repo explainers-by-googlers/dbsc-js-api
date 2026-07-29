@@ -127,7 +127,7 @@ This synchronous call ignores pending registrations and immediately returns an a
   {
     "origin": "https://example.com",
     "sessionId": "foo",
-    "creationTime": 1780493529912,
+    "creationTime": 1780493529,
     "sessionScope": { ... },
     "refreshUrl": "/refreshFoo",
     "expiresIn": 600000
@@ -135,7 +135,7 @@ This synchronous call ignores pending registrations and immediately returns an a
   {
     "origin": "https://example.com",
     "sessionId": "xyz",
-    "creationTime": 1780493529912,
+    "creationTime": 1780493529,
     "sessionScope": { ... },
     "refreshUrl": "https://id.example.com/refreshXyz",
     "expiresIn": 600000
@@ -143,7 +143,7 @@ This synchronous call ignores pending registrations and immediately returns an a
 ]
 ```
 
-All time durations and timestamps are in milliseconds for consistency.
+All time durations and timestamps are [`NumericDate`](https://www.rfc-editor.org/info/rfc7519/#section-2) for consistency with JSON Web Token.
 
 ### Pending registrations
 
