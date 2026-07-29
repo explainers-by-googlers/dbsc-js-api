@@ -107,7 +107,7 @@ We propose extending the user agent `Navigator` interface and introducing a new 
 
 ### Querying existing sessions
 
-An established DBSC session is uniquely identified by its `origin` and `session identifier`. Browsers store additional metadata about these sessions. Websites can ask the browser to instantly return a list of all active sessions they are authorized to see. This allows the page to verify if a user already has a DBSC session before deciding what to do next.
+An established DBSC session is uniquely identified by its [`schemeful site`](https://source.chromium.org/chromium/chromium/src/+/main:net/base/schemeful_site.h) (scheme and eTLD+1 for an origin) and `session identifier`. Browsers store additional metadata about these sessions. Websites can ask the browser to instantly return a list of all active sessions they are authorized to see. This allows the page to verify if a user already has a DBSC session before deciding what to do next.
 
 Here is an example of how a developer would query those sessions in code:
 
