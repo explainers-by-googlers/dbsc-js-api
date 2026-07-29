@@ -173,7 +173,7 @@ Below are example reports of a typical success and failure:
 ```json
 {
   "success": true,
-  "endTime": 1780493529912,
+  "endTime": 1780493529,
   "registrationUrl": "https://id.example.com/register",
   "origin": "https://example.com",
   "sessionId": "foo"
@@ -183,7 +183,7 @@ Below are example reports of a typical success and failure:
 ```json
 {
   "success": false,
-  "endTime": 1780493529912,
+  "endTime": 1780493529,
   "registrationUrl": "https://id.example.com/register",
   "reason": "Persistent server error",
   "code": 500
