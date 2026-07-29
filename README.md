@@ -73,7 +73,7 @@ This explainer proposes a new JavaScript API that provides a synchronization mec
 ## Non-goals
 
 - Deprecating header-based flows: The HTTP header mechanism will remain fully supported and is not being replaced by this API.
-- Insecure contexts: DBSC is inherently designed for secure contexts. Exposing this API in non-HTTPS environments is explicitly out of scope, unless for testing purposes (i.e. when calls are made from localhost).
+- Insecure contexts: DBSC is inherently designed for secure contexts. Exposing this API in non-HTTPS environments is explicitly out of scope, unless for testing purposes (i.e. when calls are made from `localhost`).
 
 ## User research
 
