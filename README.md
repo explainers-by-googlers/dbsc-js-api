@@ -113,9 +113,9 @@ Here is an example of how a developer would query those sessions in code:
 
 ```js
 // Ensure DBSC is supported
-if (!('securesession' in navigator)) return;
+if (!('deviceBoundSessions' in navigator)) return;
 // List all sessions visible to us
-const sessions = navigator.securesession.getExistingSessions();
+const sessions = navigator.deviceBoundSessions.getExistingSessions();
 // Find a session of interest or confirm its absence
 for (const session of sessions) { }
 ```
@@ -130,7 +130,7 @@ This synchronous call ignores pending registrations and immediately returns an a
     "creationTime": 1780493529912,
     "sessionScope": { ... },
     "refreshUrl": "/refreshFoo",
-    "expiresIn": 600000
+    "refreshDueIn": 600000
   },
   {
     "origin": "https://example.com",
@@ -138,7 +138,7 @@ This synchronous call ignores pending registrations and immediately returns an a
     "creationTime": 1780493529912,
     "sessionScope": { ... },
     "refreshUrl": "https://id.example.com/refreshXyz",
-    "expiresIn": 600000
+    "refreshDueIn": 600000
   }
 ]
 ```
@@ -152,7 +152,7 @@ Registration attempts are triggered by HTTP headers. They may result from a loca
 A simple use case with an inline fetch would look like this:
 
 ```js
-const observer = new DbscRegistrationObserver((reports, observer) => {
+const observer = new DeviceBoundSessionsObserver((reports, observer) => {
   reports.forEach((report) => {
     if (report.registrationUrl === 'https://id.example.com/register') {
       if (report.success) {
@@ -198,7 +198,7 @@ A navigation response itself may contain DBSC registration headers. Scripts on t
 
 ```js
 const options = { buffered: true };
-const observer = new DbscRegistrationObserver((reports, observer) => {
+const observer = new DeviceBoundSessionsObserver((reports, observer) => {
   // Handle reports, including past events.
 }, options);
 observer.observe();
@@ -206,7 +206,7 @@ observer.observe();
 
 Certain login flows also take place over multiple pages, which the buffer also covers. For background scripts (Web Workers) the buffer gives more limited visibility. Determining exactly which past events a script is allowed to see requires careful consideration. We explore how this works in a section about [past attempts visibility](#registration-attempts-visibility) and evaluate a few [alternative approaches](#alternative-registration-attempts-visibility). Additionally, we have highlighted specific challenges related to background scripts in the [open question regarding Web Workers](#open-question-web-workers).
 
-Regardless of the scope of this buffer, browsers should put a reasonable limit on the number of stored events and their time-to-live. This will prevent privacy and memory issues, especially in long-lived Single Page Applications or background Web Workers
+Regardless of the scope of this buffer, browsers should put a reasonable limit on the number of stored events and their time-to-live. This will prevent privacy and memory issues, especially in long-lived Single Page Applications or background Web Workers.
 
 ## Detailed design discussion
 
@@ -218,17 +218,13 @@ If there are valid Web Workers use cases requiring non-local registration visibi
 
 ### Open question: Proof generation (signed `fetch()`)
 
-We are exploring a point-in-time challenge mechanism, such as `fetch(url, { secureSessionId: 'session_id' })`. The resulting request would then contain a cryptographic proof of possession of the private key of `session_id` (assuming such a session exists, and the request is [in scope of that session](https://w3c.github.io/webappsec-dbsc/#algo-url-in-scope)).
+We are exploring a point-in-time challenge mechanism, such as `fetch(url, { deviceBoundSessionsId: 'session_id' })`. The resulting request would then contain a cryptographic proof of possession of the private key of `session_id` (assuming such a session exists, and the request is [in scope of that session](https://w3c.github.io/webappsec-dbsc/#algo-url-in-scope)).
 
 The proof of possession could be a JWT ([RFC 7519](https://datatracker.ietf.org/doc/html/rfc7519)) or an HTTP Message Signature ([RFC 9421](https://datatracker.ietf.org/doc/html/rfc9421)).
 
 ### Open question: async / await registration query
 
-The [first code example](#querying-existing-sessions) of this proposal would arguably be much more ergonomic if scripts could simply await a Promise. An initial draft proposed a Promise-returning `navigator.securesession.waitForRegistrations()` that would resolve once all pending registrations finish. It would also automatically include buffered events, reporting a status list of all past registrations. This is less in line with modern APIs and seems like a generally worse developer experience.
-
-### Open question: Naming
-
-The current proposal uses a mix of "Secure Session" and "DBSC" in different places. This could be unified, for example by replacing `navigator.securesession` with `navigator.dbsc`, or `SecureSessionObserver` with `DbscRegistrationObserver`.
+The [first code example](#querying-existing-sessions) of this proposal would arguably be much more ergonomic if scripts could simply await a Promise. An initial draft proposed a Promise-returning `navigator.deviceBoundSessions.waitForRegistrations()` that would resolve once all pending registrations finish. It would also automatically include buffered events, reporting a status list of all past registrations. This is less in line with modern APIs and seems like a generally worse developer experience.
 
 ## Considered alternatives
 
@@ -248,11 +244,11 @@ Also, overloading arguments to `navigator.credentials.get` would make that API m
 
 ### Client-initiated refresh (`refresh()`)
 
-We considered a `navigator.securesession.refresh()` method that would trigger a cookie refresh. However, the existing spec already encourages proactive background refreshes by the browser. Site-initiated refreshes might be counter-productive, especially if we introduce a [point-in-time challenge mechanism](#open-question-proof-generation-signed-fetch).
+We considered a `navigator.deviceBoundSessions.refresh()` method that would trigger a cookie refresh. However, the existing spec already encourages proactive background refreshes by the browser. Site-initiated refreshes might be counter-productive, especially if we introduce a [point-in-time challenge mechanism](#open-question-proof-generation-signed-fetch).
 
 ### Registration trigger (`start()`)
 
-We considered an active registration API (e.g. `navigator.securesession.start()`) to initiate registrations purely via JS instead of HTTP headers. We're leaning towards abandoning this part of the API:
+We considered an active registration API (e.g. `navigator.deviceBoundSessions.start()`) to initiate registrations purely via JS instead of HTTP headers. We're leaning towards abandoning this part of the API:
 
 - Redundancy: The proposed read-only API combined with a `fetch()` call is functionally very similar to a dedicated `start()` method, making its added value minimal.
 - Security risks: Exposing the cryptographic challenge directly to the JS environment introduces risks. A malicious browser extension could intercept the challenge, block the registration, and complete it with their own exportable private key (key-swapping).
@@ -260,7 +256,7 @@ We considered an active registration API (e.g. `navigator.securesession.start()`
 
 ### Alternative existing sessions visibility
 
-Instead of extending the list of origins from which an existing session is visible (see [below](#existing-sessions-visibility)), we could mandate a simpler, stricter Same-Origin Policy (SOP). The only origin allowed to query existing sessions is the session's origin. Subdomains that need DBSC information would then host an iframe to the main origin. The iframe calls `navigator.securesession.getExistingSessions()` (note the permissions policy for cross-origin frames, also below) and posts the status back to the parent window via `window.parent.postMessage()`. But coordinating events promotes bespoke solutions and increases the attack surface.
+Instead of extending the list of origins from which an existing session is visible (see [below](#existing-sessions-visibility)), we could mandate a simpler, stricter Same-Origin Policy (SOP). The only origin allowed to query existing sessions is the session's origin. Subdomains that need DBSC information would then host an iframe to the main origin. The iframe calls `navigator.deviceBoundSessions.getExistingSessions()` (note the permissions policy for cross-origin frames, also below) and posts the status back to the parent window via `window.parent.postMessage()`. But coordinating events promotes bespoke solutions and increases the attack surface.
 
 On the contrary, sites may want to include more domains from which existing sessions are visible. It could be interesting to add a new [session scope](https://w3c.github.io/webappsec-dbsc/#session-scope) field to expand the allowed origins. But we feel this is not necessary and too error prone.
 
