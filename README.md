@@ -30,6 +30,7 @@ This proposal is an early design sketch by Google to describe the problem below 
   - [Registration attempts](#registration-attempts)
     - [Past attempts buffer](#past-attempts-buffer)
   - [Querying sessions](#querying-sessions)
+  - [Timing out](#timing-out)
 - [Detailed design discussion](#detailed-design-discussion)
   - [Open question: Web Workers](#open-question-web-workers)
   - [Open question: Proof generation (signed `fetch()`)](#open-question-proof-generation-signed-fetch)
@@ -212,6 +213,19 @@ This is an example `session` report:
   "refreshDueIn": 600000
 }
 ```
+
+### Timing out
+
+Due to the complex and networked nature of DBSC, placing an upper bound on the observing time will be extremely common practice. Instead of forcing developers to use a separate mechanism, we propose to make `AbortSignal` a first-class citizen of this API. This would be an additional option passed to the constructor:
+
+```js
+const dbscObserver = new DeviceBoundSessionsObserver(
+  (reports, observer) => { /* ... */ },
+  { signal: AbortSignal.timeout(3000) },
+)
+```
+
+This allows developers to use an `AbortController` and link not only timeouts but also user cancellation, page teardowns, etc.
 
 ## Detailed design discussion
 
