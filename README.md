@@ -34,12 +34,12 @@ This proposal is an early design sketch by Google to describe the problem below 
 - [Detailed design discussion](#detailed-design-discussion)
   - [Open question: Web Workers](#open-question-web-workers)
   - [Open question: Proof generation (signed `fetch()`)](#open-question-proof-generation-signed-fetch)
-  - [Open question: async / await registration query](#open-question-async--await-registration-query)
   - [Open question: Session termination report](#open-question-session-termination-report)
 - [Considered alternatives](#considered-alternatives)
   - [Server-side HTTP polling](#server-side-http-polling)
   - [Integration with Credential Management API](#integration-with-credential-management-api)
   - [Synchronous getter (`getExistingSessions()`)](#synchronous-getter-getexistingsessions)
+  - [async / await registration query](#async--await-registration-query)
   - [Client-initiated refresh (`refresh()`)](#client-initiated-refresh-refresh)
   - [Registration trigger (`start()`)](#registration-trigger-start)
   - [Alternative existing sessions visibility](#alternative-existing-sessions-visibility)
@@ -241,10 +241,6 @@ We are exploring a point-in-time challenge mechanism, such as `fetch(url, { devi
 
 The proof of possession could be a JWT ([RFC 7519](https://datatracker.ietf.org/doc/html/rfc7519)) or an HTTP Message Signature ([RFC 9421](https://datatracker.ietf.org/doc/html/rfc9421)).
 
-### Open question: async / await registration query
-
-The [first code example](#registration-attempts) of this proposal would arguably be more ergonomic if scripts could simply await a Promise. An initial draft proposed a Promise-returning `navigator.deviceBoundSessions.waitForRegistrations()` that would resolve once all pending registrations finish. It would also automatically include buffered events, reporting a status list of all past registrations. This is less in line with modern APIs and seems like a generally worse developer experience.
-
 ### Open question: Session termination report
 
 The observer could report session termination events and their reason. This may be useful, although some of this information is already available to websites through DBSC [debug headers](https://w3c.github.io/webappsec-dbsc/#header-secure-session-skipped).
@@ -308,6 +304,10 @@ if (hasSessionOfInterest(sessions)) {
 We feel this dual interface is not needed for our primary use case of synchronizing actions with registration events. In addition, this synchronous getter may encourage developers to rely on JavaScript to detect DBSC sessions in other scenarios. In such cases a server-side decision based on bound cookies is often better, as it's much more robust and secure. See also [this section about malicious browser extensions](#malicious-browser-extensions).
 
 Developers who truly need to only list existing sessions can still use the observer, although it's a more cumbersome setup and cannot be synchronous.
+
+### async / await registration query
+
+The [first code example](#registration-attempts) of this proposal would arguably be more ergonomic if scripts could simply await a Promise. An initial draft proposed a Promise-returning `navigator.deviceBoundSessions.waitForRegistrations()` that would resolve once all pending registrations finish. It would also automatically include buffered events, reporting a status list of all past registrations. This is less in line with modern APIs and seems like a generally worse developer experience.
 
 ### Client-initiated refresh (`refresh()`)
 
