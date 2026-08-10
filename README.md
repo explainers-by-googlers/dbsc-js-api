@@ -153,7 +153,7 @@ Below are examples of typical successful and failed `registration` reports. Succ
 {
   "type": "registration",
   "success": false,
-  "endTime": 1780493529,
+  "endTime": 1780493529912,
   "registrationUrl": "https://id.example.com/register",
   "reason": "Persistent server error",
   "code": 500
