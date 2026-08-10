@@ -345,7 +345,7 @@ Since this API exposes cryptographic session states, we suggest enforcing strict
 
 ### Secure contexts
 
-The JS features are only available over HTTPS, like the rest of DBSC. HTTP is allowed for calls made from `localhost` for testing purposes.
+The JS features are only available over [Secure Contexts](https://www.w3.org/TR/secure-contexts/), like the rest of DBSC.
 
 ### Scoping
 
