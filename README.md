@@ -49,6 +49,7 @@ This proposal is an early design sketch by Google to describe the problem below 
   - [Secure contexts](#secure-contexts)
   - [Scoping](#scoping)
     - [Existing sessions visibility](#existing-sessions-visibility)
+    - [Cross-site restrictions](#cross-site-restrictions)
     - [Registration attempts visibility](#registration-attempts-visibility)
   - [Permissions policy](#permissions-policy)
   - [Tracking vectors](#tracking-vectors)
@@ -71,6 +72,7 @@ This explainer proposes a new JavaScript API that provides a synchronization mec
 - Provide JavaScript capabilities to check the state of DBSC registration attempts and established sessions.
 - Enable IdPs to know what and how cookies are bound before redirecting a user during SSO flows.
 - Eliminate the vulnerability window where temporary unbound cookies are issued during session setup.
+- Suggest and discuss future API surface for a compatible and coherent initial specification.
 
 ## Non-goals
 
@@ -162,15 +164,15 @@ Below are examples of typical successful and failed `registration` reports. Succ
 
 All time durations and timestamps are in milliseconds for consistency.
 
-Attempts to [federate](https://w3c.github.io/webappsec-dbsc/#federated-sessions) do have more details, such as `provider url` and `provider session id`. Note that even successful attempts do not have a `sessionId` or `sessionOrigin`. We propose a `session` report type below to convey that information.
+Attempts to [federate](https://w3c.github.io/webappsec-dbsc/#federated-sessions) do have more details, such as `provider URL` and `provider session id`. Note that even successful attempts do not have a `sessionId` or `sessionOrigin`. We propose a `session` report type below to convey that information.
 
 #### Past attempts buffer
 
 A navigation response itself may contain DBSC registration headers. Scripts on the resulting page may miss such registration attempts. It's therefore necessary to grant visibility into past registration attempts. The observer constructor takes a `buffered` option that causes it to immediately report past attempts. See the example code in the next section.
 
-This functionality is inspired by the [report buffer of `ReportingObserver`](https://www.w3.org/TR/reporting-1/#observers). We borrow the term "buffer" for consistency.
+This functionality is inspired by the [report buffer of `ReportingObserver`](https://www.w3.org/TR/reporting-1/#observers). We borrow the term "buffer" for consistency. Buffered events are not "consumed" by an Observer instance, but stay available to other instances.
 
-Determining exactly which past attempts a script is allowed to see requires careful consideration. We explore how this works in a section about [past attempts visibility](#registration-attempts-visibility) and evaluate a few [alternative approaches](#alternative-registration-attempts-visibility). Additionally, we have highlighted specific challenges related to background scripts in [this open question regarding Web Workers](#open-question-web-workers).
+Defining partitioned buffer space requires some consideration. We explore how this works in a section about [attempts visibility](#registration-attempts-visibility) and evaluate a few [alternative approaches](#alternative-registration-attempts-visibility).
 
 ### Querying sessions
 
@@ -231,9 +233,15 @@ This allows developers to use an `AbortController` and link not only timeouts bu
 
 ### Open question: Web Workers
 
-Web Workers can call `getExistingSessions()` but they might also need access to registration attempts. However, most are decoupled from a top-level navigation context. They would therefore not "see" as much as an in-Document script. We could still give background scripts visibility into registrations triggered by their own fetches.
+This discussion relates to the [scoping](#scoping) section further down.
 
-If there are valid Web Workers use cases requiring non-local registration visibility we could change their visibility to a broader per-origin scope, akin to `localStorage` (see [below](#alternative-registration-attempts-visibility)). We would then need to address a different set of concerns, such as Incognito mode leaks, cross-origin redirect complexities, opaque origin iframes, BFCache interactions, or memory management.
+Established sessions (`session` reports) are virtually stored in the User Agent's Storage Shed (similar to `IndexedDB`). This means Web Workers have access to them without needing special treatment.
+
+Registration attempts (`registration` reports) on the other hand go into the Traversable Navigable's Storage Shed (similar to `sessionStorage`). When there's no Traversable Navigable, these reports are at least visible to their Environment Settings Object. This means the caller, Web Worker or not, of a registration-triggering `fetch()` will have visibility into the resulting report.
+
+Since most Web Workers do not have a Traversable Navigable, they will only have visibility into their "own" registration attempts. They cannot see as much as page scripts.
+
+**Feedback most welcome:** If this visibility constraint blocks certain Web Worker use cases, we could change `registration` reports visibility to the broader User Agent's Storage Shed, alongside `session` reports. This may have implications, for example on privacy or multi-threading, hence our current proposal to limit registration visibility.
 
 ### Open question: Proof generation (signed `fetch()`)
 
@@ -329,7 +337,7 @@ On the contrary, sites may want to include more domains from which existing sess
 
 ### Alternative registration attempts visibility
 
-Our [scope proposal below](#registration-attempts-visibility) ties registration events to the top-level navigation context. In other words, different pages in the same tab can observe the status of past registrations.
+Our [scope proposal below](#registration-attempts-visibility) ties registration events to the Traversable Navigable. In other words, different pages in the same tab can observe the status of past registrations.
 
 Registration attempts could have a broader origin scope, similar to that of `localStorage`. While this alternative doesn't raise obvious privacy concerns it introduces extra complexity. We discuss this more in [this open question regarding Web Workers](#open-question-web-workers).
 
@@ -349,49 +357,51 @@ The JS features are only available over [Secure Contexts](https://www.w3.org/TR/
 
 ### Scoping
 
-In this proposal we have two different report types: `registration` and `session`.
+The proposal has two different report types: `registration` and `session`. This section explains what report types are visible to what scripts using abstractions from the [Storage spec](https://storage.spec.whatwg.org/), like Storage Shed, Shelf, and Key.
 
-The origin of a registration attempt can only be its `registration URL`. Successful attempts spawn sessions, covering an `origin` and with a `refresh URL`. Note that those entities must be same-site with each other, but they can be three different origins [under certain conditions](https://w3c.github.io/webappsec-dbsc/#ref-for-json-session-scope-include_site).
-
-This section describes what report type is visible to what origin and context. In summary, for a script on origin `O` and top-level browsing context `C`, a `DeviceBoundSessionsObserver` will provide reports about:
-
-1. Future `registration` started by a response in `C` whose `registration URL` is same-origin with `O`,
-2. Future `session` whose `origin`, or `refresh URL` is same-origin with `O`.
-3. When using the `{ buffered: true }` option, the script will additionally (and immediately) learn about:
-    - a. Past `registration` started by a response in `C` whose `registration URL` is same-origin with `O`,
-    - b. Existing `session` whose `origin` or `refresh URL` is same-origin with `O`.
+Borrowing Storage concepts hopefully makes DBSC events visibility clear, while inheriting several privacy-preserving properties like opaque origins handling or partitioned states. We do not, however, suggest implementing a new formal Storage Endpoint for DBSC metadata, mainly because of the [`ESO` fallback](#registration-attempts-visibility) feature we describe further down.
 
 #### Existing sessions visibility
 
-*`session` reports (2 and 3b in the list above)*
+An established DBSC session has a registrable domain (called its [`origin`](https://w3c.github.io/webappsec-dbsc/#framework-scope)) and a [`refresh URL`](https://w3c.github.io/webappsec-dbsc/#framework-session). These must be same-site but can be on different origins [under certain conditions](https://w3c.github.io/webappsec-dbsc/#ref-for-json-session-scope-include_site). A session doesn't automatically cover its whole `origin`: cookie policies [also apply](https://w3c.github.io/webappsec-dbsc/#privacy-cookies) to DBSC.
 
-Existing sessions are visible to scripts executing on the session's [origin](https://w3c.github.io/webappsec-dbsc/#framework-scope) and the origin of its [refresh URL](https://w3c.github.io/webappsec-dbsc/#framework-session) if different.
+DBSC sessions are inherently unpartitioned, keyed only by their registrable domain. They also explicitly [do not support CHIPS](https://w3c.github.io/webappsec-dbsc/#ref-for-json-session-credential%E2%91%A0).
 
-Like the cookies they bind, established DBSC sessions have a very global scope. `session` reports have a global per-origin visibility, but still respect private browsing boundaries or potential third-party restrictions (see also [Permissions policy](#permissions-policy)).
+In Storage terms, DBSC session metadata live in the User Agent's (`local`) Shed, in the Shelf addressed by the first-party key `[session's registrable domain, session's origin]`. We propose to mirror this to another Shelf, `[session's registrable domain, session's refresh URL's origin]`.
 
 > [!NOTE]
 > **Rationale for including the refresh origin by default:**
-> Large sites often have a hardened subdomain dedicated to authentication, with stronger XSS protections. This is a natural origin for hosting refresh endpoints. Allowing direct access to DBSC data from such subdomains encourages better security architectures. The browser also verified the relationship between these two origins via a .well-known check at registration.
+> Large sites often have a hardened subdomain dedicated to authentication, with stronger XSS protections. This is a natural origin for hosting refresh endpoints. Allowing direct access to DBSC data from such a subdomain encourages better security architectures.
+
+#### Cross-site restrictions
+
+For clients with partitioned storage and cross-site restrictions, an iframe `I` on the top-level site `S` would have the Storage Key `[S,I]`. It needs to use the Storage Access API to elevate its access to `[I,I]` and gain access to the DBSC session data stored there. This also aligns nicely with how SAA grants access to third-party cookies, which DBSC has deep ties to.
+
+If needed, we could add a new entry to the `types` argument of `requestStorageAccess` to grant access only to DBSC data, as opposed to the whole `localStorage`.
 
 #### Registration attempts visibility
 
-*`registration` reports (1 and 3a in the list above)*
+A registration's URL is derived from a response's URL. The DBSC spec [requires](https://w3c.github.io/webappsec-dbsc/#ref-for-concept-request-url%E2%91%A1) this to be same-site with the originating request's origin.
 
-Registration attempts do not have a session configuration. The resulting session's `origin` is only known if and when the attempt succeeds. A `registration` report is only visible to scripts on its `registration URL`'s origin. Successful registration attempts also spawn a new `session` report.
+Successful registration attempts also spawn a new `session` report, whose visibility follows [its own rules](#existing-sessions-visibility).
 
-A browser needs to store registration attempts to feed the observer's buffer. Attempts are only available in the top-level browsing context (TLBC) of the response that triggered it. This is similar to the per-tab visibility of `sessionStorage` (see [Session-Only Storage](https://html.spec.whatwg.org/multipage/webstorage.html)).
+In Storage terms, registration attempts live in a Traversable Navigable's (`session`) Shed, in the Shelf addressed by the Key `[originating request's site, registration endpoint's origin]`.
 
-If no TLBC exists, failed attempts are instead stored alongside the `WindowOrWorkerGlobalScope`. Such attempts have more limited visibility. We discuss this in the [open question regarding Web Workers](#open-question-web-workers).
+The Traversable Navigable can be looked up from the request's [`client`](https://fetch.spec.whatwg.org/#concept-request-client) (or deduced from its `reserved client` for navigation requests).
 
-Browsers should also put a reasonable limit on the number of stored attempts and their time-to-live. This prevents privacy and memory issues, especially in long-lived Single Page Applications or background Web Workers.
+If no Traversable Navigable exists, for example in certain Web Workers, `registration` reports are instead stored alongside the Environment Settings Object found in the request's `client`. Such attempts have more limited visibility. We discuss this in the [open question regarding Web Workers](#open-question-web-workers).
+
+Registration events that lack a Traversable Navigable and have a `null` request `client` are simply not observable through the JS API.
+
+Browsers should also put a reasonable limit on the number of attempts stored in each buffer and their time-to-live. This prevents privacy and memory issues, especially in long-lived Single Page Applications or background Web Workers.
 
 ### Permissions policy
 
-Cross-origin frames cannot query registration states unless explicitly authorized via a permission policy (e.g. `allow="dbsc-session-credentials-get"`).
+Cross-origin frames cannot call the DBSC API unless explicitly authorized via a permission policy (e.g. `allow="dbsc-session-credentials-get"`). This mirrors other granular, storage-related permissions like [`private-aggregation`](https://patcg-individual-drafts.github.io/private-aggregation-api/#exposing).
 
 ### Tracking vectors
 
-A session's details must not be readable when its cookies would not be included in a request (an Incognito tab for example). Sessions and keys [must be deleted](https://w3c.github.io/webappsec-dbsc/#privacy-considerations) alongside cleared site data, making them unavailable for lookup. This restriction includes Incognito modes or 3rd party contexts for user agents that block `SameSite=None` cookies.
+A session's details must not be readable when its cookies would not be included in a request. Sessions and keys [must be deleted](https://w3c.github.io/webappsec-dbsc/#privacy-considerations) alongside cleared site data, making them unavailable for lookup. This restriction includes Incognito modes or third-party contexts for user agents that block `SameSite=None` cookies.
 
 This proposal helps with [SSO handoffs](#sso-handoffs) but does not bypass third-party cookie restrictions or cross-site tracking protections. The underlying identity federation still relies on standard platform capabilities (e.g. FedCM, OAuth redirects).
 
