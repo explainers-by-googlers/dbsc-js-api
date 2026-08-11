@@ -75,7 +75,7 @@ This explainer proposes a new JavaScript API that provides a synchronization mec
 ## Non-goals
 
 - Deprecating header-based flows: The HTTP header mechanism will remain fully supported and is not being replaced by this API.
-- Insecure contexts: DBSC is inherently designed for secure contexts. Exposing this API in non-HTTPS environments is explicitly out of scope.
+- Insecure contexts: DBSC is inherently designed for secure contexts. Exposing this API in non-[secure contexts](https://www.w3.org/TR/secure-contexts/) is explicitly out of scope.
 
 ## User research
 
@@ -174,7 +174,7 @@ Determining exactly which past attempts a script is allowed to see requires care
 
 ### Querying sessions
 
-An established DBSC session is uniquely identified by its `origin` and `session identifier`. Browsers store additional metadata about these sessions. Websites must be able to list active sessions they are authorized to see. This allows the page to learn more details about the session.
+An established DBSC session is identified by a unique string (`session identifier`) on a [registrable domain](https://url.spec.whatwg.org/#host-registrable-domain). Browsers store additional metadata about these sessions. Websites must be able to list active sessions they are authorized to see. This allows the page to learn more details about the session.
 
 With the observer's buffer capability we can consolidate this feature into the observer itself. When created with `{ buffered: true }`, the observer will also immediately report existing sessions. Only sessions [visible from the current origin](#existing-sessions-visibility) are included.
 
@@ -345,7 +345,7 @@ Since this API exposes cryptographic session states, we suggest enforcing strict
 
 ### Secure contexts
 
-The JS features are only available over HTTPS, like the rest of DBSC.
+The JS features are only available over [Secure Contexts](https://www.w3.org/TR/secure-contexts/), like the rest of DBSC.
 
 ### Scoping
 
