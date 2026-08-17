@@ -109,7 +109,7 @@ When a user authenticates, the server initiates DBSC registration but may initia
 
 The API provides a synchronization mechanism to learn about registration attempts and existing sessions.
 
-We propose introducing a new Observer object to allow state-querying capabilities. There are three different report types, described below. We suggest using the Observer interface over the more common "event listener" pattern, specifically for the buffering capability described [in this subsection](#past-attempts-buffer).
+We propose introducing a new Observer object to allow state-querying capabilities. There are two different report types, described below. We suggest using the Observer interface over the more common "event listener" pattern, specifically for the buffering capability described [in this subsection](#past-attempts-buffer).
 
 ### Registration attempts
 
@@ -164,7 +164,7 @@ Below are examples of typical successful and failed `registration` reports. Succ
 
 All time durations and timestamps are in milliseconds for consistency.
 
-Attempts to [federate](https://w3c.github.io/webappsec-dbsc/#federated-sessions) do have more details, such as `provider URL` and `provider session id`. Note that even successful attempts do not have a `sessionId` or `sessionOrigin`. We propose a `session` report type below to convey that information.
+Attempts to [federate](https://w3c.github.io/webappsec-dbsc/#federated-sessions) have more details, such as `provider URL` and `provider session id`. Note that even successful attempts do not have a `sessionId` or `sessionOrigin`. We propose a `session` report type below to convey that information.
 
 #### Past attempts buffer
 
@@ -281,9 +281,9 @@ Today the only practical alternative to this API is for websites to implement HT
 
 ### Integration with Credential Management API
 
-`navigator.credentials` already handles WebAuthn, FedCM, and password managers. It might seem intuitive to add DBSC to this namespace. However, session authentication is fairly independent from user identity: many sessions don't have an identity associated (intermediate sessions during sign-in flows, carts in shopping, guest checkout flows).
+`navigator.credentials` already handles WebAuthn, FedCM, and password managers. It might seem intuitive to add DBSC to this namespace. However, session authentication is fairly independent from user identity: many sessions don't have an identity associated (e.g. intermediate sessions during sign-in flows, carts in shopping, or guest checkout flows).
 
-Also, overloading arguments to `navigator.credentials.get` would make that API more complex, and `navigator.credentials.getExistingSessions` would be confusing. We argue that a separate `navigator` namespace fits the DBSC use cases better.
+Also, overloading arguments to `navigator.credentials.get` would make that API more complex, and `navigator.credentials.newDbscObserver` would be confusing. We argue that a global-scope constructor fits the DBSC use cases better.
 
 ### Synchronous getter (`getExistingSessions()`)
 
@@ -305,7 +305,7 @@ const sessions = navigator.deviceBoundSessions.getExistingSessions();
 if (hasSessionOfInterest(sessions)) {
   // Proceed
 } else {
-  new DeviceBoundSessionsObserver( /* ... */).observe();
+  new DeviceBoundSessionsObserver(/* ... */).observe();
 }
 ```
 
@@ -331,7 +331,9 @@ We considered an active registration API (e.g. `navigator.deviceBoundSessions.st
 
 ### Alternative existing sessions visibility
 
-Instead of extending the list of origins from which an existing session is visible (see [below](#existing-sessions-visibility)), we could mandate a simpler, stricter Same-Origin Policy (SOP). The only origin allowed to query existing sessions is the session's origin. Subdomains that need DBSC information would then host an iframe to the main origin. The iframe calls `navigator.deviceBoundSessions.getExistingSessions()` (note the permissions policy for cross-origin frames, also below) and posts the status back to the parent window via `window.parent.postMessage()`. But coordinating events promotes bespoke solutions and increases the attack surface.
+Instead of allowing the refresh origin to query existing session (see [below](#existing-sessions-visibility)), we could mandate a simpler, stricter Same-Origin Policy. The only origin allowed to query existing sessions is the session's origin. Subdomains that need DBSC information would then host an iframe to the main origin. The iframe calls the API (note the permissions policy for cross-origin frames, [also below](#permissions-policy)) and posts the status back to the parent window via `window.parent.postMessage()`. But coordinating events promotes bespoke solutions and increases the attack surface.
+
+Moreover, when the session's and refresh endpoint's origin are different, the latter is often on a hardened, more secure subdomain. Giving it direct access to DBSC data encourages better security architectures.
 
 On the contrary, sites may want to include more domains from which existing sessions are visible. It could be interesting to add a new [session scope](https://w3c.github.io/webappsec-dbsc/#session-scope) field to expand the allowed origins. But we feel this is not necessary and too error prone.
 
@@ -359,7 +361,7 @@ The JS features are only available over [Secure Contexts](https://www.w3.org/TR/
 
 The proposal has two different report types: `registration` and `session`. This section explains what report types are visible to what scripts using abstractions from the [Storage spec](https://storage.spec.whatwg.org/), like Storage Shed, Shelf, and Key.
 
-Borrowing Storage concepts hopefully makes DBSC events visibility clear, while inheriting several privacy-preserving properties like opaque origins handling or partitioned states. We do not, however, suggest implementing a new formal Storage Endpoint for DBSC metadata, mainly because of the [`ESO` fallback](#registration-attempts-visibility) feature we describe further down.
+Borrowing Storage concepts hopefully makes DBSC events visibility clear, while inheriting several privacy-preserving properties like opaque origins handling or partitioned states. We do not, however, suggest implementing a new formal Storage Endpoint for DBSC metadata, mainly because of the [ESO fallback](#registration-attempts-visibility) feature we describe further down.
 
 #### Existing sessions visibility
 
@@ -371,7 +373,7 @@ In Storage terms, DBSC session metadata live in the User Agent's (`local`) Shed,
 
 > [!NOTE]
 > **Rationale for including the refresh origin by default:**
-> Large sites often have a hardened subdomain dedicated to authentication, with stronger XSS protections. This is a natural origin for hosting refresh endpoints. Allowing direct access to DBSC data from such a subdomain encourages better security architectures.
+> Large sites often have a hardened subdomain dedicated to authentication, with stronger XSS protections. This is a natural origin for hosting refresh endpoints. Allowing direct access to DBSC data from such a subdomain encourages better security architectures. We discuss this further in [this considered alternative](#alternative-existing-sessions-visibility).
 
 #### Cross-site restrictions
 
@@ -389,7 +391,7 @@ In Storage terms, registration attempts live in a Traversable Navigable's (`sess
 
 The Traversable Navigable can be looked up from the request's [`client`](https://fetch.spec.whatwg.org/#concept-request-client) (or deduced from its `reserved client` for navigation requests).
 
-If no Traversable Navigable exists, for example in certain Web Workers, `registration` reports are instead stored alongside the Environment Settings Object found in the request's `client`. Such attempts have more limited visibility. We discuss this in the [open question regarding Web Workers](#open-question-web-workers).
+If no Traversable Navigable exists, for example in certain Web Workers, `registration` reports are instead stored alongside the Environment Settings Object (ESO) found in the request's `client`. Such attempts have more limited visibility. We discuss this in the [open question regarding Web Workers](#open-question-web-workers).
 
 Registration events that lack a Traversable Navigable and have a `null` request `client` are simply not observable through the JS API.
 
