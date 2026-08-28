@@ -93,7 +93,7 @@ This is an example `session` report:
   "credentials": [{
     "type": "cookie",
     "name": "auth_cookie",
-    "attributes": "Domain=example.com; Path=/; Secure; HttpOnly; SameSite=None"
+    "attributes": "Domain=example.com; Path=/; Secure; SameSite=None"
   }],
   "refreshDueIn": 600000
 }
@@ -269,9 +269,9 @@ The observer is only available over [Secure Contexts](https://www.w3.org/TR/secu
 
 ### `HttpOnly` cookies
 
-A `session` report contains a list of bound [credentials](https://w3c.github.io/webappsec-dbsc/#format-session-credentials). Some of these may be `HttpOnly` cookies. While the API does not return the value of cookies, it would reveal their names. Note that this only concerns bound cookies, listed in a DBSC session.
+A `session` report contains a list of bound [credentials](https://w3c.github.io/webappsec-dbsc/#format-session-credentials). Some of these may be `HttpOnly` cookies. While the API does not return the value of cookies, it would reveal their names.
 
-See also whatwg/cookiestore#37, loosely related to that topic.
+To keep `HttpOnly` cookies truly off-JavaScript, the API removes or redacts such cookies from a `session` entry. See also whatwg/cookiestore#37, loosely related to that topic.
 
 ### Tracking vectors
 
