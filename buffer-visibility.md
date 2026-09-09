@@ -1,33 +1,29 @@
 # Report buffer visibility
 
-This document attempts to give a more formal scope to events reported by `DeviceBoundSessionsObserver`. The explainer in this repository focuses on *what* the visibility should be. This document explores *how* we can achieve it.
+This document attempts to give a more formal scope to events reported by `DeviceBoundSessionsObserver`.
 
-The proposal has two different report types: `registration` and `session`. Here we explain what report types are visible to what scripts, using abstractions from the [Storage spec](https://storage.spec.whatwg.org/), like Storage Shed, Shelf, and Key.
-
-Borrowing Storage concepts hopefully makes DBSC events visibility clear, while inheriting several privacy-preserving properties like opaque origins handling or partitioned states. We do not, however, suggest implementing a new formal Storage Endpoint for DBSC metadata, mainly because of the [ESO fallback](#registration-attempts-visibility) feature we describe further down.
+The proposal has two different report types: `registration` and `session`. Here we explain what report types are visible to what scripts.
 
 ## Existing sessions visibility
 
-An established DBSC session has a registrable domain (called its [`origin`](https://w3c.github.io/webappsec-dbsc/#framework-scope)) and a [`refresh URL`](https://w3c.github.io/webappsec-dbsc/#framework-session). These must be same-site but can be on different origins [under certain conditions](https://w3c.github.io/webappsec-dbsc/#ref-for-json-session-scope-include_site). A session doesn't automatically cover its whole `origin`: cookie policies [also apply](https://w3c.github.io/webappsec-dbsc/#privacy-cookies) to DBSC.
+An established DBSC session has a given [scope](https://w3c.github.io/webappsec-dbsc/#framework-scope). The spec also has an algorithm to [identify if a URL is in scope of a session](https://w3c.github.io/webappsec-dbsc/#algo-url-in-scope).
 
-DBSC sessions are inherently unpartitioned, keyed only by their registrable domain. They also explicitly [do not support CHIPS](https://w3c.github.io/webappsec-dbsc/#algo-create-session).
+We propose running that algorithm on a script's URL to decide whether that script can see a given session. Note that the algorithm explicitly excludes the refresh URL. This is desirable for DBSC, but not for our visibility question. Our algorithm would instead automatically include the refresh URL.
 
-In Storage terms, DBSC session metadata live in the User Agent's (`local`) Shed, in the Shelf addressed by the first-party key `[session's registrable domain, session's origin]`. We propose to mirror this to another Shelf, `[session's registrable domain, session's refresh URL's origin]`.
-
-> [!NOTE]
-> **Rationale for including the refresh origin by default:**
-> Large sites often have a hardened subdomain dedicated to authentication, with stronger XSS protections. This is a natural origin for hosting refresh endpoints. Allowing direct access to DBSC data from such a subdomain encourages better security architectures.
+Since exclusion rules apply, sites can hide their sessions from entire subdomains. For example `{ "type": "exclude", "domain": "untrusted.example.com", "path": "/" }`. Path-based exclusion offers less privacy or security benefits, but they still make sense to apply for ergonomic reasons.
 
 ## Cross-site restrictions
 
-For clients with partitioned storage and cross-site restrictions, an iframe `I` on the top-level site `S` would have the Storage Key `[S,I]`. It needs to use the Storage Access API to elevate its access to `[I,I]` and gain access to the DBSC session data stored there. This also aligns nicely with how SAA grants access to third-party cookies, which DBSC has deep ties to.
+DBSC sessions data is inherently unpartitioned, keyed only by the session's registrable domain. DBSC also explicitly [does not support CHIPS](https://w3c.github.io/webappsec-dbsc/#algo-create-session).
 
-If needed, we could add a new entry to the `types` argument of `requestStorageAccess` to grant access only to DBSC data, as opposed to the whole `localStorage`.
+For clients with partitioned storage and cross-site restrictions, an iframe `I` on the top-level site `S` would be partitioned by `[S,I]`. A script on `I` needs to use the Storage Access API to elevate its access to `[I,I]` and gain access to the unpartitioned DBSC session data.
+
+If needed, we could add a new entry to the `types` argument of `requestStorageAccess` to grant access only to DBSC data.
 
 ## Registration attempts visibility
 
 A registration's URL is derived from a response's URL. The DBSC spec [requires](https://w3c.github.io/webappsec-dbsc/#algo-session-request) this to be same-site with the originating request's origin.
 
-In Storage terms, registration attempts live in the User Agent's (`local`) Shed, in the Shelf addressed by the Key `[originating request's site, registration endpoint's origin]`.
+Registration attempts can therefore be partitioned by `[registration endpoint's site, registration endpoint's origin]`. In other words, a registration event is 1P data to the registration URL's origin. This information would be available to scripts on that origin as if stored in `localStorage`.
 
-Successful registration attempts also contain a `session` report, possibly extending that report's visibility if the registering origin is different from the session's origin and its refresh endpoint's. We think this is not a privacy or security issue.
+Successful registration attempts also contain a `session` report. This may extend that new session's visibility, but not past the eTLD+1. We think this is not a privacy or security issue.
