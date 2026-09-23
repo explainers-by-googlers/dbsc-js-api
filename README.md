@@ -87,15 +87,6 @@ This is an example `session` report:
   "sessionId": "foo",
   "refreshUrl": "/refreshFoo",
   "creationTime": 1780493529912,
-  "sessionScope": [
-    { "type": "exclude", "domain": "*.example.com", "path": "/static" }
-  ],
-  "credentials": [{
-    "type": "cookie",
-    "name": "auth_cookie",
-    "attributes": "Domain=example.com; Path=/; Secure; SameSite=None"
-  }],
-  "refreshDueIn": 600000
 }
 ```
 
@@ -266,12 +257,6 @@ Since this API exposes cryptographic session states, we suggest enforcing strict
 ### Secure contexts
 
 The observer is only available over [Secure Contexts](https://www.w3.org/TR/secure-contexts/), like the rest of DBSC.
-
-### Cookies
-
-A `session` report contains a list of bound [credentials](https://w3c.github.io/webappsec-dbsc/#format-session-credentials). A script may not be allowed to access some of them, for example `HttpOnly` cookies, or depending on the script's context and the cookie's `SameSite` attribute. While the API does not return the value of cookies, it would reveal their names.
-
-To prevent undue cookie visibility, the DBSC API only returns the intersection of a session's credentials list with the output of `document.cookie`. This also lets scripts leverage the Storage Access API to gain broader cookie access if needed.
 
 ### Tracking vectors
 

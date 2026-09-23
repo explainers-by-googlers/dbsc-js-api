@@ -18,11 +18,11 @@
 
 3. Do the features in your specification expose personal information, personally-identifiable information (PII), or information derived from either?
 
-    No. DBSC sessions are bound to pseudonymous, site-specific credentials. No direct user-identifiable details are exposed by the API, unless the credentials themselves (e.g. cookie names) reveal such information.
+    No. DBSC sessions are bound to pseudonymous, site-specific credentials. No direct user-identifiable details are exposed by the API, unless the credentials themselves (e.g. the session ID) reveal such information.
 
 4. How do the features in your specification deal with sensitive information?
 
-    A session's credentials list may include the names of cookies that are `HttpOnly` or `SameSite=Strict`. The specification mandates that cookies are redacted from the list if they would otherwise not be available to JS (e.g. via `document.cookie`).
+    A session report may include a list of credentials, which may contain the names of cookies that are `HttpOnly` or `SameSite=Strict`. If this is the case, cookies are redacted from the list when they would otherwise not be available to JS (e.g. via `document.cookie`).
 
 5. Does data exposed by your specification carry related but distinct information that may not be obvious to users?
 
