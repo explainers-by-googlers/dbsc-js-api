@@ -49,7 +49,7 @@ A navigation response may contain DBSC registration headers. Scripts on the resu
 
 This functionality is inspired by the [report buffer of `ReportingObserver`](https://www.w3.org/TR/reporting-1/#observers). We borrow the term "buffer" for consistency.
 
-We expect virtually all use cases to want this buffering capability. To avoid mistakes, the constructor's `options` has an `unbuffered` boolean. This makes the buffered behavior the default.
+We expect virtually all use cases to want this buffering capability. To avoid mistakes, the constructor's `options` has an `unbuffered` boolean. This makes the buffered behavior the default. Observing does not drain or clear the buffer. `takeRecords()` does.
 
 ### Querying sessions
 
@@ -64,10 +64,8 @@ if (typeof DeviceBoundSessionsObserver === "undefined") return;
 
 const callback = (reports, observer) => {
   reports.forEach((report) => {
-    if (
-      report.type === 'session' &&
-      report.refreshUrl.endsWith('/refreshFoo')
-    ) {
+    const session = report.type === 'session' ? report : report.session;
+    if (session?.refreshUrl === 'https://example.com/refreshFoo') {
       // Inspect report.sessionId etc.
     }
   });
@@ -76,7 +74,7 @@ const callback = (reports, observer) => {
 new DeviceBoundSessionsObserver(callback).observe();
 ```
 
-This code will match a session whose refresh URL is `/refreshFoo`. If sessions exist, the code runs immediately. It runs again when a registration successfully creates a new session or overwrites one.
+This code will match a session whose refresh URL is `https://example.com/refreshFoo`, presented as either a `session` or `registration` report. If sessions exist, the code runs immediately. It runs again when a registration successfully creates a new session or overwrites one.
 
 This is an example `session` report:
 
@@ -85,12 +83,13 @@ This is an example `session` report:
   "type": "session",
   "sessionOrigin": "https://example.com",
   "sessionId": "foo",
-  "refreshUrl": "/refreshFoo",
-  "creationTime": 1780493529912,
+  "refreshUrl": "https://example.com/refreshFoo",
+  "creationTime": 1780493529912
 }
 ```
 
 All time durations and timestamps are in milliseconds for consistency.
+All URLs in reports are serialized as fully resolved, absolute URLs.
 
 ### Registration attempts
 
@@ -152,9 +151,11 @@ Certain DBSC registration headers cause an attempt to [federate](https://w3c.git
 Due to the complex and networked nature of DBSC, placing an upper bound on the observing time will be extremely commonplace. Instead of forcing developers to use a separate mechanism, we propose to make `AbortSignal` a first-class citizen of this API. This would be an additional option passed to the constructor:
 
 ```js
+const timeoutSignal = AbortSignal.timeout(3000);
+timeoutSignal.addEventListener('abort', () => { /* ... */ });
 const dbscObserver = new DeviceBoundSessionsObserver(
   (reports, observer) => { /* ... */ },
-  { signal: AbortSignal.timeout(3000) },
+  { signal: timeoutSignal },
 )
 ```
 
@@ -173,7 +174,7 @@ For example:
   "type": "termination",
   "sessionOrigin": "https://example.com",
   "sessionId": "foo",
-  "refreshUrl": "/refreshFoo",
+  "refreshUrl": "https://example.com/refreshFoo",
   "creationTime": 1780493529912,
   "terminationTime": 1780493529912,
   "reason": "unreachable"
