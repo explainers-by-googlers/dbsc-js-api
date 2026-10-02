@@ -2,6 +2,7 @@
 Title: JavaScript API for Device Bound Session Credentials
 Shortname: DBSC JS API
 Level: None
+Indent: 2
 Status: w3c/UD
 Repository: explainers-by-googlers/dbsc-js-api
 URL: https://explainers-by-googlers.github.io/dbsc-js-api
@@ -17,12 +18,267 @@ Include MDN Panels: if possible
 Include Can I Use Panels: yes
 </pre>
 
-Introduction {#intro}
-=====================
+<pre class="link-defaults">
+spec:dbsc-1; type:dfn; text:device bound session
+spec:dbsc-1; type:dfn; text:determine if a URL is in scope; for:algorithms
+spec:storage; type:dfn; text:origin; for:storage key
+spec:storage-access; type:dfn; text:has storage access; for:environment
+spec:fetch; type:dfn; text:determine the environment; for:request
+</pre>
+
+<pre class="anchors">
+type:dfn
+  url:https://w3c.github.io/webappsec-dbsc/#device-bound-session-refresh-url; text:refresh URL; for:device bound session
+  url:https://w3c.github.io/webappsec-dbsc/#device-bound-session-session-credentials; text:session credentials; for:device bound session
+  url:https://w3c.github.io/webappsec-dbsc/#session-credential; text:session credential
+  url:https://w3c.github.io/webappsec-dbsc/#json-session-credential-type; text:type; for:session credential
+  url:https://w3c.github.io/webappsec-dbsc/#session-credential-name; text:name; for:session credential
+  url:https://w3c.github.io/webappsec-dbsc/#credential-attributes; text:attributes; for:session credential
+  url:https://privacycg.github.io/storage-partitioning/#additional-keying; text:top-level site; for:storage key
+</pre>
+
+# Introduction # {#intro}
 
 For now, see the <a href=[REPOSITORYURL]>explainer</a>.
 
-See [https://garykac.github.io/procspec/](https://garykac.github.io/procspec/),
-[https://dlaliberte.github.io/bikeshed-intro/index.html](https://dlaliberte.github.io/bikeshed-intro/index.html),
-and [https://speced.github.io/bikeshed/](https://speced.github.io/bikeshed/) to get started on your
-specification.
+# The {{DeviceBoundSessionsObserver}} interface # {#the-device-bound-sessions-observer-interface}
+
+The {{DeviceBoundSessionsObserver}} interface can be used to observe {{DeviceBoundSessionsReport}}.
+
+<pre class="idl">
+[Exposed=Window]
+interface DeviceBoundSessionsObserver {
+  constructor(
+    DeviceBoundSessionsObserverCallback callback,
+    optional DeviceBoundSessionsObserverOptions options = {}
+  );
+  undefined observe();
+  undefined disconnect();
+  sequence&lt;DeviceBoundSessionsReport> takeRecords();
+};
+
+callback DeviceBoundSessionsObserverCallback = undefined (
+  sequence&lt;DeviceBoundSessionsReport> reports,
+  DeviceBoundSessionsObserver observer
+);
+</pre>
+
+## {{DeviceBoundSessionsObserverOptions}} dictionary ## {#options-dictionary}
+
+<pre class="idl">
+dictionary DeviceBoundSessionsObserverOptions {
+  boolean unbuffered = false;
+  AbortSignal signal;
+};
+</pre>
+
+<dl dfn-for="PerformanceObserverCallbackOptions" data-export>
+  : unbuffered
+  :: Foo
+  : signal
+  :: Bar
+</dl>
+
+## {{DeviceBoundSessionsObserver/observe()}} method ## {#observe-method}
+
+<div algorithm>
+  The <dfn export method for=DeviceBoundSessionsObserver>`observe()`</dfn> method instructs the user agent to register the observer and must run these steps:
+</div>
+
+## Report types ## {#report-types}
+
+<pre class="idl">
+enum DeviceBoundSessionsReportKind {
+  "session",
+  "registration"
+};
+
+dictionary DeviceBoundEstablishedSessionReport {
+  required DeviceBoundSessionsReportKind type;
+  required DOMString sessionOrigin;
+  required DOMString sessionId;
+  required DOMString refreshUrl;
+  required DOMHighResTimeStamp creationTime;
+};
+
+dictionary DeviceBoundSessionRegistrationReport {
+  required DeviceBoundSessionsReportKind type;
+  required DOMString registrationUrl;
+  required boolean success;
+  required DOMHighResTimeStamp endTime;
+  DeviceBoundEstablishedSessionReport session;
+  DOMString reason;
+  long? code = null;
+  DOMString providerUrl;
+  DOMString providerSessionId;
+};
+
+typedef (
+  DeviceBoundSessionRegistrationReport
+  or DeviceBoundEstablishedSessionReport) DeviceBoundSessionsReport;
+</pre>
+
+A <dfn export type><code>DeviceBoundSessionsReport</code></dfn> can be:
+
+- A <dfn export dictionary><code>DeviceBoundEstablishedSessionReport</code></dfn>, representing a [=device bound session=].
+- A <dfn export dictionary><code>DeviceBoundSessionRegistrationReport</code></dfn>, representing the outcome of [=create a session=].
+
+# Algorithms # {#algorithms}
+
+## Changes to [=create a session=] ## {#modification-to-dbsc-creation}
+
+<div algorithm='create-a-session-change'>
+  When [=create a session=] returns, the user agent must run these steps:
+
+  1. Let |registration| be TODO (from the remote algo, might need more changes).
+  1. [=list/For each=] |observer| in [TODO observers list]:
+    1. Let |ESO| be |observer|'s [=relevant settings object=].
+    1. If [=determine registration visibility=] returns "visible" for |ESO| and |registration|, call |observer|'s {{DeviceBoundSessionsObserver/constructor(callback)/callback}} with |registration| and |observer|, then [=iteration/continue=].
+    1. If [=determine session visibility=] returns "visible" for |ESO| and |registration|'s {{DeviceBoundSessionRegistrationReport/session}}, call |observer|'s {{DeviceBoundSessionsObserver/constructor(callback)/callback}} with |registration|'s {{DeviceBoundSessionRegistrationReport/session}} and |observer|.
+</div>
+
+## Session reports visibility ## {#session-reports-visibility}
+
+<div algorithm>
+  <dfn export>Determine session visibility</dfn> returns "visible" when [=environment settings object=] |environment| is allowed to receive a report about [=device bound session=] |session|. Returns "hidden" otherwise.
+
+  1. If |environment| is not a [=secure context=], return "hidden".
+
+  1. Let |url| be |environment|'s [=environment/creation URL=].
+
+  1. If |url| is not |session|'s [=device bound session/refresh URL=]:
+
+    1. If the result of running [=algorithms/determine if a URL is in scope=] with |url| and |session| is false, return "hidden".
+
+  1. Optional, TODO: pick one (or do both?)
+    - Return [=check whether credentials would be included=] given |environment| and |session|.
+    - If |environment| [=environment/has storage access=], return "visible".
+
+  1. Return "hidden".
+</div>
+
+<div algorithm>
+To <dfn>check whether credentials would be included</dfn>, given an [=environment settings object=] |environment| and a [=device bound session=] |session|:
+
+  1. Let |url| be |environment|'s [=environment/creation URL=].
+
+  Note: |url| can be reused from an earlier step if merged.
+
+  1. Let |request| be a new [=request=] whose [=request/URL=] is |url|, [=request/method=] is \``GET`\`, [=request/client=] is |environment|, [=request/mode=] is "`same-origin`", and [=request/credentials mode=] is "`include`".
+
+  1. [=list/For each=] |credential| of |session|'s [=device bound session/session credentials=]:
+
+    1. If |credential|'s [=session credential/type=] is "`cookie`", and a cookie with |credential|'s [=session credential/attributes=] would be attached to |request| (see [[RFC6265#cookie]]), return "visible".
+
+  1. Return "hidden".
+</div>
+
+<div class="example" id="session-visibility-example">
+
+  Note, TODO: rework the example after rules rework (esp. hasStorageAccess())
+
+  Given the following (incomplete) session definition:
+
+  ```json
+  {
+    "session_identifier": "session_id",
+    "refresh_url": "/refresh",
+    "scope": {
+      "origin": "https://example.com",
+      "include_site": true,
+      "scope_specification" : [
+        { "type": "exclude", "domain": "untrusted.example.com", "path": "/" },
+        { "type": "exclude", "domain": "*.example.com", "path": "/static" }
+      ]
+    },
+    "credentials": [{
+      "type": "cookie",
+      "name": "auth_cookie",
+      "attributes": "Domain=example.com; Path=/; Secure; HttpOnly; SameSite=Strict"
+    }]
+  }
+  ```
+
+  The following table illustrates whether `session_id` is visible to various execution environments:
+
+  <table>
+    <tr>
+        <th>Creation URL</th>
+        <th>Environment Context</th>
+        <th>Visible?</th>
+        <th>Reason</th>
+    </tr>
+    <tr>
+        <td>`https://example.com/account`</td>
+        <td>Top-level window</td>
+        <td>`true`</td>
+        <td>Secure, in scope, and `auth_cookie` attaches to same-origin requests.</td>
+    </tr>
+    <tr>
+        <td>`https://sub.example.com/app`</td>
+        <td>Top-level window</td>
+        <td>`true`</td>
+        <td>Step 6: Permitted by `include_site`, domain matches `example.com`, same-site context.</td>
+    </tr>
+    <tr>
+        <td>`https://example.com/refresh`</td>
+        <td>Top-level window or embedded frame</td>
+        <td>`true`</td>
+        <td>Step 3: Creation URL equals refresh URL, short-circuiting scope and cookie checks.</td>
+    </tr>
+    <tr>
+        <td>`https://example.com/account`</td>
+        <td>Cross-site embedded frame (e.g., inside `https://other.org`)</td>
+        <td>`false`</td>
+        <td>Step 6: Request client is cross-site; `SameSite=Strict` blocks cookie attachment.</td>
+    </tr>
+    <tr>
+        <td>`https://untrusted.example.com/`</td>
+        <td>Top-level window</td>
+        <td>`false`</td>
+        <td>Step 4: URL is excluded by the explicit `untrusted.example.com` rule in `scope_specification`.</td>
+    </tr>
+    <tr>
+        <td>`https://app.example.com /static/index.html`</td>
+        <td>Top-level window</td>
+        <td>`false`</td>
+        <td>Step 4: URL path matches the `*.example.com` prefix exclusion rule for `/static`.</td>
+    </tr>
+    <tr>
+        <td>`http://example.com/account`</td>
+        <td>Top-level window</td>
+        <td>`false`</td>
+        <td>Step 1: Insecure scheme; environment is not a secure context.</td>
+    </tr>
+  </table>
+
+</div>
+
+## Registration reports visibility ## {#registration-reports-visibility}
+
+<div algorithm>
+  <dfn export>Determine registration visibility</dfn> returns "visible" when [=environment settings object=] |environment| is allowed to receive a report about [registration attempt ref. TODO] |registration|. Returns "hidden" otherwise.
+  
+  1. If |environment| is not a [=secure context=], return "hidden".
+  1. Let |observer key| be the result of running [=obtain a storage key for non-storage purposes=] given |environment|.
+  1. If |observer key| [=storage key/equals=] |registration|'s [=report storage key=], return "visible".
+  1. Return "hidden".
+</div>
+
+### Registration storage key ### {#registration-storage-key}
+
+<div algorithm>
+
+  Note: This algorithm takes [storage partitioning](https://privacycg.github.io/storage-partitioning/) into account.
+
+  The <dfn export>report storage key</dfn> of a [registration attempt ref. TODO] |registration attempt| is defined as:
+
+  1. Let |request| be |registration attempt|'s [TODO registration attempt/request].
+  1. Let |environment| be [=request/determine the environment=] given |request|.
+  1. Let |top-level site| be |environment|'s [=storage key/top-level site=].
+     TODO: Too ill-defined?
+  1. Let |origin| be |request|'s [=request/URL=]'s [=url/origin=].
+  1. Return a [=storage key=] [=tuple=] consisting of the [=storage key/origin=] |origin| and the [=storage key/top-level site=] |top-level site|.
+</div>
+
+
