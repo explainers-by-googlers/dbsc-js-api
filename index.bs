@@ -1,12 +1,13 @@
-<pre class='metadata'>
+<pre class="metadata">
 Title: JavaScript API for Device Bound Session Credentials
 Shortname: DBSC JS API
 Level: None
+Indent: 2
 Status: w3c/UD
 Repository: explainers-by-googlers/dbsc-js-api
 URL: https://explainers-by-googlers.github.io/dbsc-js-api
 Editor: Sidney Bovet, Google https://google.com, sbovet@google.com
-Abstract: An API for client-side DBSC Session State Management.
+Abstract: An API for client-side Device Bound Session Credentials (DBSC) Session State Management.
 Markup Shorthands: markdown yes, css no
 Complain About: accidental-2119 yes, missing-example-ids yes
 Assume Explicit For: yes
@@ -17,12 +18,452 @@ Include MDN Panels: if possible
 Include Can I Use Panels: yes
 </pre>
 
-Introduction {#intro}
-=====================
+<pre class="link-defaults">
+spec:dbsc-1; type:dfn; text:device bound session
+spec:dbsc-1; type:dfn; text:session identifier; for:device bound session
+spec:dbsc-1; type:dfn; text:refresh url; for:device bound session
+spec:dbsc-1; type:dfn; text:session scope; for:device bound session
+spec:dbsc-1; type:dfn; text:origin; for:session scope
+spec:dbsc-1; type:dfn; text:session credentials; for:device bound session
+spec:dbsc-1; type:dfn; text:session credential
+spec:dbsc-1; type:dfn; text:type; for:JSON session credential
+spec:dbsc-1; type:dfn; text:name; for:session credential
+spec:dbsc-1; type:dfn; text:attributes; for:session credential
+spec:dbsc-1; type:dfn; text:expiration timestamp; for:device bound session
+spec:dbsc-1; type:dfn; text:session store
+spec:dbsc-1; type:dfn; text:determine if a url is in scope; for:algorithms
+spec:dbsc-1; type:dfn; text:send a request; for:algorithms
+spec:hr-time-3; type:dfn; text:estimated monotonic time of the unix epoch
+spec:storage; type:dfn; text:origin; for:storage key
+spec:storage-access; type:dfn; text:has storage access; for:environment
+</pre>
+
+<pre class="anchors">
+type:dfn
+  url:https://privacycg.github.io/storage-partitioning/#additional-keying; text:top-level site; for:storage key
+</pre>
+
+# Introduction # {#intro}
 
 For now, see the <a href=[REPOSITORYURL]>explainer</a>.
 
-See [https://garykac.github.io/procspec/](https://garykac.github.io/procspec/),
-[https://dlaliberte.github.io/bikeshed-intro/index.html](https://dlaliberte.github.io/bikeshed-intro/index.html),
-and [https://speced.github.io/bikeshed/](https://speced.github.io/bikeshed/) to get started on your
-specification.
+This spec is an early-stage draft. Missing details and remaining TODOs are called out with `Issue:` blocks.
+
+# Security considerations # {#security-considerations}
+
+# Privacy considerations # {#privacy-considerations}
+
+# Framework # {#framework}
+
+## Observer store ## {#framework-observer-store}
+
+The user agent maintains an <dfn>observer store</dfn>. It is a [=set=] of weak references to {{DeviceBoundSessionsObserver}} objects. The store is initially empty.
+
+When an observer has been reclaimed by garbage collection, it must be [=set/removed=] from the store.
+
+## Registration buffer and store ## {#registration-buffer-and-store}
+
+The user agent maintains a <dfn>registration attempts store</dfn>. It is a [=map=] from [=storage key=] to [=registration buffer=]. The store is initially empty.
+
+Issue: Should we make this a formal [=storage endpoint=]?
+
+A <dfn>registration buffer</dfn> is a [=list=] of {{DeviceBoundSessionRegistrationReport}}s. Each buffer is initially empty.
+
+User agents should put a reasonable limit on the number of attempts stored in each buffer and their time-to-live.
+
+# The {{DeviceBoundSessionsObserver}} interface # {#the-device-bound-sessions-observer-interface}
+
+This interface can be used to observe [=device bound sessions=] and registration attempts.
+
+<pre class="idl">
+[Exposed=Window, SecureContext]
+interface DeviceBoundSessionsObserver {
+  constructor(
+    DeviceBoundSessionsObserverCallback callback,
+    optional DeviceBoundSessionsObserverOptions options = {}
+  );
+  undefined observe();
+  undefined disconnect();
+  sequence&lt;DeviceBoundSessionsReport> takeRecords();
+};
+
+callback DeviceBoundSessionsObserverCallback = undefined (
+  sequence&lt;DeviceBoundSessionsReport> reports,
+  DeviceBoundSessionsObserver observer
+);
+</pre>
+
+A {{DeviceBoundSessionsObserver}} has an associated <dfn for="DeviceBoundSessionsObserver">callback</dfn> (a {{DeviceBoundSessionsObserverCallback}}) and an associated <dfn for="DeviceBoundSessionsObserver">options</dfn> (a {{DeviceBoundSessionsObserverOptions}}).
+
+<div algorithm="DeviceBoundSessionsObserver constructor">
+  When the <dfn constructor for="DeviceBoundSessionsObserver">DeviceBoundSessionsObserver(|callback|, |options|)</dfn> constructor is called:
+
+  1. Set [=this=]'s [=DeviceBoundSessionsObserver/callback=] to |callback|.
+  1. Set [=this=]'s [=DeviceBoundSessionsObserver/options=] to |options|.
+</div>
+
+<div algorithm>
+  To <dfn for="observer">inform</dfn> a {{DeviceBoundSessionsObserver}} |observer| of a [=list=] of {{DeviceBoundSessionsReport}}s |reports|:
+
+  1. [=Assert=]: |reports| is not [=list/is empty|empty=].
+  1. [=Queue a global task=] on the [=networking task source=] given |observer|'s [=relevant global object=] to run these steps:
+    1. If [=observer store=] does not [=list/contain=] |observer|, then return.
+    1. [=Invoke=] |observer|'s [=DeviceBoundSessionsObserver/callback=] with « |reports|, |observer| » and "`report`", and [=callback this value=] |observer|.
+
+  Advisement: Callers of this algorithm must verify that |observer| is allowed to know about |reports| under the user agent's current policies, notably storage partitioning.
+</div>
+
+## {{DeviceBoundSessionsObserverOptions}} dictionary ## {#options-dictionary}
+
+<pre class="idl">
+dictionary DeviceBoundSessionsObserverOptions {
+  AbortSignal signal;
+};
+</pre>
+
+<dl dfn-for="DeviceBoundSessionsObserverOptions">
+  : <dfn dict-member>signal</dfn>
+  :: The {{AbortSignal/abort}} event stops the observer from receiving further reports.
+</dl>
+
+## {{DeviceBoundSessionsObserver/observe()}} method ## {#observe-method}
+
+<div algorithm="DeviceBoundSessionsObserver.observe()">
+  When <dfn method for=DeviceBoundSessionsObserver>observe()</dfn> is called:
+
+  1. Let |signal| be [=this=]'s [=DeviceBoundSessionsObserver/options=][{{DeviceBoundSessionsObserverOptions/signal}}].
+  1. If |signal| [=map/exists=] and is [=AbortSignal/aborted=], then return.
+  1. If [=observer store=] [=list/contains=] [=this=], then return.
+  1. [=set/Append=] a weak reference to [=this=] to [=observer store=].
+  1. If |signal| [=map/exists=], then [=AbortSignal/add|add the following abort steps=] to |signal|:
+    1. Call [=this=]'s {{DeviceBoundSessionsObserver/disconnect()}}.
+  1. Let |reports| be the result of [=observer/collecting past reports=] for [=this=].
+  1. If |reports| is not [=list/is empty|empty=], then [=observer/inform=] [=this=] of |reports|.
+</div>
+
+<div algorithm>
+  To <dfn for="observer">collect past reports</dfn> for a {{DeviceBoundSessionsObserver}} |observer|:
+
+  1. Let |environment| be |observer|'s [=relevant settings object=].
+  1. Let |observer key| be the result of running [=obtain a storage key for non-storage purposes=] given |environment|.
+  1. Let |reports| be a new [=list=].
+  1. If [=registration attempts store=][|observer key|] [=map/exists=], then set |reports| to a [=list/clone=] of [=registration attempts store=][|observer key|].
+  1. [=list/For each=] |sessions by id| of [=session store=]'s [=map/values=]:
+    1. [=list/For each=] |session| of |sessions by id|'s [=map/values=]:
+      1. If [=determine session visibility=] given |environment| and |session| does not return "visible", then [=iteration/continue=].
+      1. Let |session report| be the result of [=creating an established session report=] given |session|.
+      1. If |reports| [=list/contains=] a {{DeviceBoundSessionRegistrationReport}} |registration| such that |registration|[{{DeviceBoundSessionRegistrationReport/session}}] [=map/exists=] and [=DeviceBoundEstablishedSessionReport/equals=] |session report|, then [=iteration/continue=].
+      1. [=list/Append=] |session report| to |reports|.
+  1. Return |reports|.
+</div>
+
+## {{DeviceBoundSessionsObserver/disconnect()}} method ## {#disconnect-method}
+
+<div algorithm="DeviceBoundSessionsObserver.disconnect()">
+  When <dfn method for=DeviceBoundSessionsObserver>disconnect()</dfn> is called:
+
+  1. [=set/Remove=] [=this=] from [=observer store=].
+
+  User agents may want to also clean up previously set up {{AbortSignal/abort}} steps and remove garbage-collected references from the store.
+</div>
+
+## {{DeviceBoundSessionsObserver/takeRecords()}} method ## {#take-records-method}
+
+<div algorithm="DeviceBoundSessionsObserver.takeRecords()">
+  When <dfn method for=DeviceBoundSessionsObserver>takeRecords()</dfn> is called:
+
+  1. Let |reports| be the result of [=observer/collecting past reports=] for [=this=].
+  1. Let |observer key| be the result of running [=obtain a storage key for non-storage purposes=] given [=this=]'s [=relevant settings object=].
+  1. [=map/Remove=] [=registration attempts store=][|observer key|].
+  1. Return |reports|.
+</div>
+
+## Report types ## {#report-types}
+
+<pre class="idl">
+enum DeviceBoundSessionsReportKind {
+  "session",
+  "registration"
+};
+
+dictionary DeviceBoundEstablishedSessionReport {
+  required DeviceBoundSessionsReportKind type;
+  required DOMString sessionOrigin;
+  required DOMString sessionId;
+  required DOMString refreshUrl;
+  required DOMHighResTimeStamp creationTime;
+};
+
+dictionary DeviceBoundSessionRegistrationReport {
+  required DeviceBoundSessionsReportKind type;
+  required DOMString registrationUrl;
+  required boolean success;
+  required DOMHighResTimeStamp endTime;
+  DeviceBoundEstablishedSessionReport session;
+  DOMString reason;
+  unsigned short code;
+  DOMString providerUrl;
+  DOMString providerSessionId;
+};
+
+typedef (
+  DeviceBoundSessionRegistrationReport
+  or DeviceBoundEstablishedSessionReport) DeviceBoundSessionsReport;
+</pre>
+
+### Registration attempt report ### {#registration-attempt-report}
+
+A <dfn dictionary>DeviceBoundSessionRegistrationReport</dfn> represents the outcome of the multi-stage process started by [=process a session registration=]. See [[#changes-to-dbsc]].
+
+<dl dfn-for="DeviceBoundSessionRegistrationReport">
+  : <dfn dict-member>type</dfn>
+  :: Must be {{DeviceBoundSessionsReportKind/"registration"}}.
+  : <dfn dict-member>registrationUrl</dfn>
+  :: The [=URL serializer|serialized=] registration endpoint [=URL=] to which the registration request was sent.
+  : <dfn dict-member>success</dfn>
+  :: True if the registration attempt resulted in an established [=device bound session=]; false otherwise.
+  : <dfn dict-member>endTime</dfn>
+  :: The [=duration from=] the [=Unix epoch=] to the [=current coarsened wall time|coarsened wall time=] when the registration process concluded.
+    <div class="note">
+      Using the [=wall clock=] means {{DeviceBoundSessionRegistrationReport/endTime}} is not monotonic across registration reports. For example, system clock changes could modify the apparent order of reports.
+
+      An alternative would be to compute these timestamps using the [=estimated monotonic time of the Unix epoch=] here.
+      
+      This would in turn have the drawback of inconsistent timestamps between a successful registration report's {{DeviceBoundSessionRegistrationReport/endTime}} and its {{DeviceBoundSessionRegistrationReport/session}}[{{DeviceBoundEstablishedSessionReport/creationTime}}].
+    </div>
+  : <dfn dict-member>session</dfn>
+  :: The {{DeviceBoundEstablishedSessionReport}} for the newly created [=device bound session=], present when {{DeviceBoundSessionRegistrationReport/success}} is true.
+  : <dfn dict-member>reason</dfn>
+  :: A human-readable or categorical description of why the registration attempt failed, present when {{DeviceBoundSessionRegistrationReport/success}} is false.
+
+    Issue: Replace the free-form string with a WebIDL enum of standardized failure reasons.
+  : <dfn dict-member>code</dfn>
+  :: The HTTP [=response/status=] code received from the registration endpoint, present when the attempt failed due to an HTTP response status.
+  : <dfn dict-member>providerUrl</dfn>
+  :: For a [[dbsc-1#federated-sessions|federated session]] registration attempt, the [=URL serializer|serialized=] provider [=URL=] specified in the [:Secure-Session-Registration:] header.
+  : <dfn dict-member>providerSessionId</dfn>
+  :: For a [[dbsc-1#federated-sessions|federated session]] registration attempt, the provider session identifier specified in the [:Secure-Session-Registration:] header.
+</dl>
+
+<div algorithm>
+  To <dfn export>record a registration attempt</dfn> given a [=URL=] |registration URL|, a [=boolean=] |success|, an optional [=device bound session=] |resulting session|, an optional [=string=] |reason|, an optional integer |code|, an optional [=URL=] |provider URL|, and an optional [=string=] |provider session id|:
+
+  1. Let |report| be a {{DeviceBoundSessionRegistrationReport}} with:
+      : {{DeviceBoundSessionRegistrationReport/type}}
+      :: {{DeviceBoundSessionsReportKind/"registration"}}.
+      : {{DeviceBoundSessionRegistrationReport/registrationUrl}}
+      :: The [=URL serializer=] of |registration URL|.
+      : {{DeviceBoundSessionRegistrationReport/success}}
+      :: |success|.
+      : {{DeviceBoundSessionRegistrationReport/endTime}}
+      :: The [=duration from=] the [=Unix epoch=] to the [=current coarsened wall time=].
+
+  1. If |resulting session| was given, then set |report|[{{DeviceBoundSessionRegistrationReport/session}}] to the result of [=creating an established session report=] given |resulting session|.
+  1. If |reason| was given, then set |report|[{{DeviceBoundSessionRegistrationReport/reason}}] to |reason|.
+  1. If |code| was given, then set |report|[{{DeviceBoundSessionRegistrationReport/code}}] to |code|.
+  1. If |provider URL| was given, then set |report|[{{DeviceBoundSessionRegistrationReport/providerUrl}}] to the [=URL serializer=] of |provider URL|.
+  1. If |provider session id| was given, then set |report|[{{DeviceBoundSessionRegistrationReport/providerSessionId}}] to |provider session id|.
+  1. [=DeviceBoundSessionRegistrationReport/Report=] |report| with |resulting session| (if given).
+</div>
+
+<div algorithm>
+  To <dfn for="DeviceBoundSessionRegistrationReport">report</dfn> a {{DeviceBoundSessionRegistrationReport}} |report| given an optional [=device bound session=] |resulting session|:
+
+  1. Let |registration key| be the [=DeviceBoundSessionRegistrationReport/storage key=] of |report|.
+  1. [=list/For each=] |observer| of [=observer store=]:
+    1. Let |environment| be the [=relevant settings object=] for |observer|.
+    1. Let |observer key| be the result of running [=obtain a storage key for non-storage purposes=] given |environment|.
+    1. If |observer key| [=storage key/equals=] |registration key|, then [=observer/inform=] |observer| of « |report| », and [=iteration/continue=].
+    1. If |resulting session| was not given, then [=iteration/continue=].
+    1. If [=determine session visibility=] given |environment| and |resulting session| does not return "visible", then [=iteration/continue=].
+    1. [=observer/Inform=] |observer| of « |report|[{{DeviceBoundSessionRegistrationReport/session}}] ».
+  1. If [=registration attempts store=][|registration key|] does not [=map/exist=], then [=map/set=] [=registration attempts store=][|registration key|] to a new [=registration buffer=].
+  1. [=list/Append=] |report| to [=registration attempts store=][|registration key|].
+</div>
+
+<div algorithm>
+  The <dfn for="DeviceBoundSessionRegistrationReport">storage key</dfn> of a {{DeviceBoundSessionRegistrationReport}} |registration| is defined as:
+
+  1. Let |url| be the result of running the [=URL parser=] on |registration|[{{DeviceBoundSessionRegistrationReport/registrationUrl}}].
+  1. Let |origin| be |url|'s [=url/origin=].
+  1. Let |site| be [=obtain a site=] given |origin|.
+  1. Return a [=storage key=] whose [=storage key/origin=] is |origin| and [=storage key/top-level site=] is |site|.
+</div>
+
+### Established session report ### {#established-session-report}
+
+A <dfn dictionary>DeviceBoundEstablishedSessionReport</dfn> represents a [=device bound session=]. Note that {{DeviceBoundSessionRegistrationReport}} also contains a {{DeviceBoundSessionRegistrationReport/session}}: if an observer is [=observer/informed=] of an established session via a (buffered) {{DeviceBoundSessionRegistrationReport}}, it must not be informed of the same session a second time via a {{DeviceBoundEstablishedSessionReport}}.
+
+<dl dfn-for="DeviceBoundEstablishedSessionReport">
+  : <dfn dict-member>type</dfn>
+  :: Must be {{DeviceBoundSessionsReportKind/"session"}}.
+  : <dfn dict-member>sessionOrigin</dfn>
+  :: The [=serialization of an origin|serialized=] [=session scope/origin=] of the [=device bound session=]'s [=device bound session/session scope=].
+  : <dfn dict-member>sessionId</dfn>
+  :: The [=device bound session=]'s [=device bound session/session identifier=].
+  : <dfn dict-member>refreshUrl</dfn>
+  :: The [=URL serializer|serialized=] [=device bound session/refresh URL=] of the [=device bound session=].
+  : <dfn dict-member>creationTime</dfn>
+  :: The [=duration from=] the [=Unix epoch=] to the [=device bound session=]'s [=device bound session/creation time=].
+</dl>
+
+<div algorithm>
+  To <dfn>create an established session report</dfn> given a [=device bound session=] |session|:
+
+  1. Let |report| be a new {{DeviceBoundEstablishedSessionReport}} dictionary with:
+      : {{DeviceBoundEstablishedSessionReport/type}}
+      :: {{DeviceBoundSessionsReportKind/"session"}}.
+      : {{DeviceBoundEstablishedSessionReport/sessionOrigin}}
+      :: The [=serialization of an origin=] given |session|'s [=device bound session/session scope=]'s [=session scope/origin=].
+      : {{DeviceBoundEstablishedSessionReport/sessionId}}
+      :: |session|'s [=device bound session/session identifier=].
+      : {{DeviceBoundEstablishedSessionReport/refreshUrl}}
+      :: The [=URL serializer=] of |session|'s [=device bound session/refresh URL=].
+      : {{DeviceBoundEstablishedSessionReport/creationTime}}
+      :: The [=duration from=] the [=Unix epoch=] to |session|'s [=device bound session/creation time=].
+  1. Return |report|.
+</div>
+
+<div algorithm>
+  A {{DeviceBoundEstablishedSessionReport}} |a| <dfn for="DeviceBoundEstablishedSessionReport">equals</dfn> another {{DeviceBoundEstablishedSessionReport}} |b| if all of the following are true:
+
+  - |a|[{{DeviceBoundEstablishedSessionReport/sessionOrigin}}] is |b|[{{DeviceBoundEstablishedSessionReport/sessionOrigin}}].
+  - |a|[{{DeviceBoundEstablishedSessionReport/sessionId}}] is |b|[{{DeviceBoundEstablishedSessionReport/sessionId}}].
+  - |a|[{{DeviceBoundEstablishedSessionReport/creationTime}}] is |b|[{{DeviceBoundEstablishedSessionReport/creationTime}}].
+
+    Note: In [[dbsc-1]], a [=device bound session=] is keyed in the [=session store=] by its site and [=device bound session/session identifier=]. Comparing {{DeviceBoundEstablishedSessionReport/creationTime}} also distinguishes a session from a later registration that overwrote the same [=device bound session/session identifier=].
+</div>
+
+# Session reports visibility # {#session-reports-visibility}
+
+<div algorithm>
+  To <dfn export>determine session visibility</dfn> given an [=environment settings object=] |environment| and a [=device bound session=] |session|:
+
+  1. Let |url| be |environment|'s [=environment/creation URL=].
+  1. If |url| is not |session|'s [=device bound session/refresh URL=]:
+    1. If the result of running [=algorithms/determine if a URL is in scope=] with |url| and |session| is false, then return "hidden".
+  1. If |environment| [=environment/has storage access=], then return "visible".
+  1. Return "hidden".
+</div>
+
+<!-- This is an alternative to checking for [=environment/has storage access=] above.
+
+<div algorithm>
+To <dfn>check whether credentials would be included</dfn>, given an [=environment settings object=] |environment| and a [=device bound session=] |session|:
+
+  1. Let |url| be |environment|'s [=environment/creation URL=].
+    Note: |url| can be reused from an earlier step if merged into the visibility algo.
+  1. Let |request| be a new [=request=] whose [=request/URL=] is |url|, [=request/method=] is \``GET`\`, [=request/client=] is |environment|, [=request/mode=] is "`same-origin`", and [=request/credentials mode=] is "`include`".
+  1. [=list/For each=] |credential| of |session|'s [=device bound session/session credentials=]:
+    1. If |credential|'s [=session credential/type=] is "`cookie`", and a cookie with |credential|'s [=session credential/attributes=] would be attached to |request| (see [[RFC6265#cookie]]), then return "visible".
+  1. Return "hidden".
+</div>
+
+-->
+
+<div class="example" id="session-visibility-example">
+
+  Issue: Consider making this a WPT instead.
+
+  Given the following (incomplete) session definition:
+
+  ```json
+  {
+    "session_identifier": "session_id",
+    "refresh_url": "/refresh",
+    "scope": {
+      "origin": "https://example.com",
+      "include_site": true,
+      "scope_specification" : [
+        { "type": "exclude", "domain": "sites.example.com", "path": "/" },
+        { "type": "exclude", "domain": "*.example.com", "path": "/static" }
+      ]
+    },
+    "credentials": [{
+      "type": "cookie",
+      "name": "auth_cookie",
+      "attributes": "Domain=example.com; Path=/; Secure; HttpOnly; SameSite=Strict"
+    }]
+  }
+  ```
+
+  The following table illustrates whether `session_id` is visible to various execution environments:
+
+  <table>
+    <tr>
+        <th>Creation URL</th>
+        <th>Storage access</th>
+        <th>Visible?</th>
+        <th>Reason</th>
+    </tr>
+    <tr>
+        <td>`https://example.com/account`</td>
+        <td>Top-level window</td>
+        <td>`true`</td>
+        <td>In scope of `session_id`, has storage access.</td>
+    </tr>
+    <tr>
+        <td>`https://sub.example.com/app`</td>
+        <td>Top-level window</td>
+        <td>`true`</td>
+        <td>Also in scope of `session_id`, by its `include_site`.</td>
+    </tr>
+    <tr>
+        <td>`https://example.com/refresh`</td>
+        <td>Top-level window</td>
+        <td>`true`</td>
+        <td>Refresh URL bypasses scope check.</td>
+    </tr>
+    <tr>
+        <td>`https://example.com/refresh`</td>
+        <td>Embedded without storage access</td>
+        <td>`false`</td>
+        <td>No access to 1P `example.com` storage.</td>
+    </tr>
+    <tr>
+        <td>`https://sites.example.com/a`</td>
+        <td>N/A</td>
+        <td>`false`</td>
+        <td>URL matches the `sites.example.com/` exclusion rule.</td>
+    </tr>
+    <tr>
+        <td>`https://app.example.com/static/index.html`</td>
+        <td>N/A</td>
+        <td>`false`</td>
+        <td>URL matches the `*.example.com/static` exclusion rule.</td>
+    </tr>
+  </table>
+
+</div>
+
+# Changes to other specifications # {#changes-to-other-specifications}
+
+## Changes to the DBSC specification ## {#changes-to-dbsc}
+
+Issue: Avoid deep monkey-patching here: open a PR against [[dbsc-1]], then remove this section.
+
+In [=device bound session=], add the following item:
+
+: <dfn for="device bound session">creation time</dfn>
+:: The [=current coarsened wall time=] at which this session was created.
+
+In [=process a session registration=]:
+
+1. Modify the step that checks if *key pair* is "`failure`" to [=record a registration attempt=] on failure.
+1. Pass *provider URL* and *provider session id* as additional optional inputs to [=algorithms/send a request=].
+
+Note: The next two changes mention "if *session id* is null" to send a report only when [=algorithms/send a request=] creates a **new** session. When that algorithm runs for a refresh, *session id* is known.
+
+In [=algorithms/send a request=]:
+
+1. Accept an optional *provider URL* and an optional *provider session id* to adequately construct a [[dbsc-1#federated-sessions|federation attempt]] report when applicable.
+1. If *session id* is null, then:
+  1. Whenever returning early due to a network error or an invalid HTTP status code, [=record a registration attempt=].
+  1. Pass *provider URL* and *provider session id* to [=create a session=].
+
+In [=create a session=]:
+
+1. Accept an optional *provider URL* and an optional *provider session id*.
+1. After setting the [=device bound session/expiration timestamp=], also set [=device bound session/creation time=].
+1. Whenever invoking *terminate the session* **and returning** (cf. the last "credential" loop), if *session id* is null, then [=record a registration attempt=] with an appropriate *failure reason*, *code*, etc.
+1. When adding a *session* to the [=session store=], if *session id* is null, then [=record a registration attempt=] (successful, passing *session*).

@@ -49,13 +49,13 @@ A navigation response may contain DBSC registration headers. Scripts on the resu
 
 This functionality is inspired by the [report buffer of `ReportingObserver`](https://www.w3.org/TR/reporting-1/#observers). We borrow the term "buffer" for consistency.
 
-We expect virtually all use cases to want this buffering capability. To avoid mistakes, the constructor's `options` has an `unbuffered` boolean. This makes the buffered behavior the default. Observing does not drain or clear the buffer. `takeRecords()` does.
+We expect virtually all use cases to want this buffering capability, so the observer always reports buffered events. Observing does not drain or clear the buffer. `takeRecords()` does.
 
 ### Querying sessions
 
 An established DBSC session is identified by a unique string (`session identifier`) on a [registrable domain](https://url.spec.whatwg.org/#host-registrable-domain). Browsers store additional metadata about these sessions. Websites must be able to list active sessions. This allows the page to learn more details about a session.
 
-Instead of a separate synchronous method, and given the observer's buffer capability, we can consolidate this feature into the observer itself. Unless created with `{ unbuffered: true }`, the observer will report existing sessions.
+Instead of a separate synchronous method, and given the observer's buffer capability, we can consolidate this feature into the observer itself: the observer also reports existing sessions.
 
 Here is an example of how to query existing sessions:
 
@@ -113,10 +113,8 @@ const callback = (reports, observer) => {
     }
   });
 };
-// Ignore past attempts
-const options = {unbuffered: true};
 
-new DeviceBoundSessionsObserver(callback, options).observe();
+new DeviceBoundSessionsObserver(callback).observe();
 // Fetch a Secure-Session-Registration header
 await fetch('https://id.example.com/start-dbsc');
 ```
