@@ -48,6 +48,168 @@ This spec is an early-stage draft. Missing details and remaining TODOs are calle
 
 # Privacy considerations # {#privacy-considerations}
 
+# Framework # {#framework}
+
+## Observer store ## {#framework-observer-store}
+
+The user agent maintains an <dfn>observer store</dfn>. It is a [=set=] of weak references to {{DeviceBoundSessionsObserver}} objects. The store is initially empty.
+
+When an observer has been reclaimed by garbage collection, it must be [=set/removed=] from the store.
+
+# The {{DeviceBoundSessionsObserver}} interface # {#the-device-bound-sessions-observer-interface}
+
+This interface can be used to observe [=device bound sessions=].
+
+<pre class="idl">
+[Exposed=Window, SecureContext]
+interface DeviceBoundSessionsObserver {
+  constructor(
+    DeviceBoundSessionsObserverCallback callback,
+    optional DeviceBoundSessionsObserverOptions options = {}
+  );
+  undefined observe();
+  undefined disconnect();
+  sequence&lt;DeviceBoundSessionsReport> takeRecords();
+};
+
+callback DeviceBoundSessionsObserverCallback = undefined (
+  sequence&lt;DeviceBoundSessionsReport> reports,
+  DeviceBoundSessionsObserver observer
+);
+</pre>
+
+A {{DeviceBoundSessionsObserver}} has an associated <dfn for="DeviceBoundSessionsObserver">callback</dfn> (a {{DeviceBoundSessionsObserverCallback}}) and an associated <dfn for="DeviceBoundSessionsObserver">options</dfn> (a {{DeviceBoundSessionsObserverOptions}}).
+
+<div algorithm="DeviceBoundSessionsObserver constructor">
+  When the <dfn constructor for="DeviceBoundSessionsObserver">DeviceBoundSessionsObserver(|callback|, |options|)</dfn> constructor is called:
+
+  1. Set [=this=]'s [=DeviceBoundSessionsObserver/callback=] to |callback|.
+  1. Set [=this=]'s [=DeviceBoundSessionsObserver/options=] to |options|.
+</div>
+
+<div algorithm>
+  To <dfn for="observer">inform</dfn> a {{DeviceBoundSessionsObserver}} |observer| of a [=list=] of {{DeviceBoundSessionsReport}}s |reports|:
+
+  1. [=Assert=]: |reports| is not [=list/is empty|empty=].
+  1. [=Queue a global task=] on the [=networking task source=] given |observer|'s [=relevant global object=] to run these steps:
+    1. If [=observer store=] does not [=list/contain=] |observer|, then return.
+    1. [=Invoke=] |observer|'s [=DeviceBoundSessionsObserver/callback=] with « |reports|, |observer| » and "`report`", and [=callback this value=] |observer|.
+
+  Advisement: Callers of this algorithm must verify that |observer| is allowed to know about |reports| under the user agent's current policies, notably storage partitioning.
+</div>
+
+## {{DeviceBoundSessionsObserverOptions}} dictionary ## {#options-dictionary}
+
+<pre class="idl">
+dictionary DeviceBoundSessionsObserverOptions {
+  AbortSignal signal;
+};
+</pre>
+
+<dl dfn-for="DeviceBoundSessionsObserverOptions">
+  : <dfn dict-member>signal</dfn>
+  :: The {{AbortSignal/abort}} event stops the observer from receiving further reports.
+</dl>
+
+## {{DeviceBoundSessionsObserver/observe()}} method ## {#observe-method}
+
+<div algorithm="DeviceBoundSessionsObserver.observe()">
+  When <dfn method for=DeviceBoundSessionsObserver>observe()</dfn> is called:
+
+  1. Let |signal| be [=this=]'s [=DeviceBoundSessionsObserver/options=][{{DeviceBoundSessionsObserverOptions/signal}}].
+  1. If |signal| [=map/exists=] and is [=AbortSignal/aborted=], then return.
+  1. If [=observer store=] [=list/contains=] [=this=], then return.
+  1. [=set/Append=] a weak reference to [=this=] to [=observer store=].
+  1. If |signal| [=map/exists=], then [=AbortSignal/add|add the following abort steps=] to |signal|:
+    1. Call [=this=]'s {{DeviceBoundSessionsObserver/disconnect()}}.
+  1. Let |reports| be the result of [=observer/collecting past reports=] for [=this=].
+  1. If |reports| is not [=list/is empty|empty=], then [=observer/inform=] [=this=] of |reports|.
+</div>
+
+<div algorithm>
+  To <dfn for="observer">collect past reports</dfn> for a {{DeviceBoundSessionsObserver}} |observer|:
+
+  1. Let |environment| be |observer|'s [=relevant settings object=].
+  1. Let |reports| be a new [=list=].
+  1. [=list/For each=] |sessions by id| of [=session store=]'s [=map/values=]:
+    1. [=list/For each=] |session| of |sessions by id|'s [=map/values=]:
+      1. If [=determine session visibility=] given |environment| and |session| does not return "visible", then [=iteration/continue=].
+      1. Let |session report| be the result of [=creating an established session report=] given |session|.
+      1. [=list/Append=] |session report| to |reports|.
+  1. Return |reports|.
+</div>
+
+## {{DeviceBoundSessionsObserver/disconnect()}} method ## {#disconnect-method}
+
+<div algorithm="DeviceBoundSessionsObserver.disconnect()">
+  When <dfn method for=DeviceBoundSessionsObserver>disconnect()</dfn> is called:
+
+  1. [=set/Remove=] [=this=] from [=observer store=].
+
+  User agents may want to also clean up previously set up {{AbortSignal/abort}} steps and remove garbage-collected references from the store.
+</div>
+
+## {{DeviceBoundSessionsObserver/takeRecords()}} method ## {#take-records-method}
+
+<div algorithm="DeviceBoundSessionsObserver.takeRecords()">
+  When <dfn method for=DeviceBoundSessionsObserver>takeRecords()</dfn> is called:
+
+  1. Let |reports| be the result of [=observer/collecting past reports=] for [=this=].
+  1. Return |reports|.
+</div>
+
+## Report types ## {#report-types}
+
+<pre class="idl">
+enum DeviceBoundSessionsReportKind {
+  "session"
+};
+
+dictionary DeviceBoundEstablishedSessionReport {
+  required DeviceBoundSessionsReportKind type;
+  required DOMString sessionOrigin;
+  required DOMString sessionId;
+  required DOMString refreshUrl;
+  required DOMHighResTimeStamp creationTime;
+};
+
+typedef DeviceBoundEstablishedSessionReport DeviceBoundSessionsReport;
+</pre>
+
+### Established session report ### {#established-session-report}
+
+A <dfn dictionary>DeviceBoundEstablishedSessionReport</dfn> represents a [=device bound session=].
+
+<dl dfn-for="DeviceBoundEstablishedSessionReport">
+  : <dfn dict-member>type</dfn>
+  :: Must be {{DeviceBoundSessionsReportKind/"session"}}.
+  : <dfn dict-member>sessionOrigin</dfn>
+  :: The [=serialization of an origin|serialized=] [=session scope/origin=] of the [=device bound session=]'s [=device bound session/session scope=].
+  : <dfn dict-member>sessionId</dfn>
+  :: The [=device bound session=]'s [=device bound session/session identifier=].
+  : <dfn dict-member>refreshUrl</dfn>
+  :: The [=URL serializer|serialized=] [=device bound session/refresh URL=] of the [=device bound session=].
+  : <dfn dict-member>creationTime</dfn>
+  :: The [=duration from=] the [=Unix epoch=] to the [=device bound session=]'s [=device bound session/creation time=].
+</dl>
+
+<div algorithm>
+  To <dfn>create an established session report</dfn> given a [=device bound session=] |session|:
+
+  1. Let |report| be a new {{DeviceBoundEstablishedSessionReport}} dictionary with:
+      : {{DeviceBoundEstablishedSessionReport/type}}
+      :: {{DeviceBoundSessionsReportKind/"session"}}.
+      : {{DeviceBoundEstablishedSessionReport/sessionOrigin}}
+      :: The [=serialization of an origin=] given |session|'s [=device bound session/session scope=]'s [=session scope/origin=].
+      : {{DeviceBoundEstablishedSessionReport/sessionId}}
+      :: |session|'s [=device bound session/session identifier=].
+      : {{DeviceBoundEstablishedSessionReport/refreshUrl}}
+      :: The [=URL serializer=] of |session|'s [=device bound session/refresh URL=].
+      : {{DeviceBoundEstablishedSessionReport/creationTime}}
+      :: The [=duration from=] the [=Unix epoch=] to |session|'s [=device bound session/creation time=].
+  1. Return |report|.
+</div>
+
 # Session reports visibility # {#session-reports-visibility}
 
 <div algorithm>
@@ -149,3 +311,18 @@ To <dfn>check whether credentials would be included</dfn>, given an [=environmen
   </table>
 
 </div>
+
+# Changes to other specifications # {#changes-to-other-specifications}
+
+## Changes to the DBSC specification ## {#changes-to-dbsc}
+
+Issue: Avoid deep monkey-patching here: open a PR against [[dbsc-1]], then remove this section.
+
+In [=device bound session=], add the following item:
+
+: <dfn for="device bound session">creation time</dfn>
+:: The [=current coarsened wall time=] at which this session was created.
+
+In [=create a session=]:
+
+1. After setting the [=device bound session/expiration timestamp=], also set [=device bound session/creation time=].
