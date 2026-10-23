@@ -1,12 +1,13 @@
-<pre class='metadata'>
+<pre class="metadata">
 Title: JavaScript API for Device Bound Session Credentials
 Shortname: DBSC JS API
 Level: None
+Indent: 2
 Status: w3c/UD
 Repository: explainers-by-googlers/dbsc-js-api
 URL: https://explainers-by-googlers.github.io/dbsc-js-api
 Editor: Sidney Bovet, Google https://google.com, sbovet@google.com
-Abstract: An API for client-side DBSC Session State Management.
+Abstract: An API for client-side Device Bound Session Credentials (DBSC) Session State Management.
 Markup Shorthands: markdown yes, css no
 Complain About: accidental-2119 yes, missing-example-ids yes
 Assume Explicit For: yes
@@ -17,12 +18,134 @@ Include MDN Panels: if possible
 Include Can I Use Panels: yes
 </pre>
 
-Introduction {#intro}
-=====================
+<pre class="link-defaults">
+spec:dbsc-1; type:dfn; text:device bound session
+spec:dbsc-1; type:dfn; text:session identifier; for:device bound session
+spec:dbsc-1; type:dfn; text:refresh url; for:device bound session
+spec:dbsc-1; type:dfn; text:session scope; for:device bound session
+spec:dbsc-1; type:dfn; text:origin; for:session scope
+spec:dbsc-1; type:dfn; text:session credentials; for:device bound session
+spec:dbsc-1; type:dfn; text:session credential
+spec:dbsc-1; type:dfn; text:type; for:JSON session credential
+spec:dbsc-1; type:dfn; text:name; for:session credential
+spec:dbsc-1; type:dfn; text:attributes; for:session credential
+spec:dbsc-1; type:dfn; text:expiration timestamp; for:device bound session
+spec:dbsc-1; type:dfn; text:session store
+spec:dbsc-1; type:dfn; text:determine if a url is in scope; for:algorithms
+spec:dbsc-1; type:dfn; text:send a request; for:algorithms
+spec:hr-time-3; type:dfn; text:estimated monotonic time of the unix epoch
+spec:storage; type:dfn; text:origin; for:storage key
+spec:storage-access; type:dfn; text:has storage access; for:environment
+</pre>
+
+# Introduction # {#intro}
 
 For now, see the <a href=[REPOSITORYURL]>explainer</a>.
 
-See [https://garykac.github.io/procspec/](https://garykac.github.io/procspec/),
-[https://dlaliberte.github.io/bikeshed-intro/index.html](https://dlaliberte.github.io/bikeshed-intro/index.html),
-and [https://speced.github.io/bikeshed/](https://speced.github.io/bikeshed/) to get started on your
-specification.
+This spec is an early-stage draft. Missing details and remaining TODOs are called out with `Issue:` blocks.
+
+# Security considerations # {#security-considerations}
+
+# Privacy considerations # {#privacy-considerations}
+
+# Session reports visibility # {#session-reports-visibility}
+
+<div algorithm>
+  To <dfn export>determine session visibility</dfn> given an [=environment settings object=] |environment| and a [=device bound session=] |session|:
+
+  1. Let |url| be |environment|'s [=environment/creation URL=].
+  1. If |url| is not |session|'s [=device bound session/refresh URL=]:
+    1. If the result of running [=algorithms/determine if a URL is in scope=] with |url| and |session| is false, then return "hidden".
+  1. If |environment| [=environment/has storage access=], then return "visible".
+  1. Return "hidden".
+</div>
+
+<!-- This is an alternative to checking for [=environment/has storage access=] above.
+
+<div algorithm>
+To <dfn>check whether credentials would be included</dfn>, given an [=environment settings object=] |environment| and a [=device bound session=] |session|:
+
+  1. Let |url| be |environment|'s [=environment/creation URL=].
+    Note: |url| can be reused from an earlier step if merged into the visibility algo.
+  1. Let |request| be a new [=request=] whose [=request/URL=] is |url|, [=request/method=] is \``GET`\`, [=request/client=] is |environment|, [=request/mode=] is "`same-origin`", and [=request/credentials mode=] is "`include`".
+  1. [=list/For each=] |credential| of |session|'s [=device bound session/session credentials=]:
+    1. If |credential|'s [=session credential/type=] is "`cookie`", and a cookie with |credential|'s [=session credential/attributes=] would be attached to |request| (see [[RFC6265#cookie]]), then return "visible".
+  1. Return "hidden".
+</div>
+
+-->
+
+<div class="example" id="session-visibility-example">
+
+  Issue: Consider making this a WPT instead.
+
+  Given the following (incomplete) session definition:
+
+  ```json
+  {
+    "session_identifier": "session_id",
+    "refresh_url": "/refresh",
+    "scope": {
+      "origin": "https://example.com",
+      "include_site": true,
+      "scope_specification" : [
+        { "type": "exclude", "domain": "sites.example.com", "path": "/" },
+        { "type": "exclude", "domain": "*.example.com", "path": "/static" }
+      ]
+    },
+    "credentials": [{
+      "type": "cookie",
+      "name": "auth_cookie",
+      "attributes": "Domain=example.com; Path=/; Secure; HttpOnly; SameSite=Strict"
+    }]
+  }
+  ```
+
+  The following table illustrates whether `session_id` is visible to various execution environments:
+
+  <table>
+    <tr>
+        <th>Creation URL</th>
+        <th>Storage access</th>
+        <th>Visible?</th>
+        <th>Reason</th>
+    </tr>
+    <tr>
+        <td>`https://example.com/account`</td>
+        <td>Top-level window</td>
+        <td>`true`</td>
+        <td>In scope of `session_id`, has storage access.</td>
+    </tr>
+    <tr>
+        <td>`https://sub.example.com/app`</td>
+        <td>Top-level window</td>
+        <td>`true`</td>
+        <td>Also in scope of `session_id`, by its `include_site`.</td>
+    </tr>
+    <tr>
+        <td>`https://example.com/refresh`</td>
+        <td>Top-level window</td>
+        <td>`true`</td>
+        <td>Refresh URL bypasses scope check.</td>
+    </tr>
+    <tr>
+        <td>`https://example.com/refresh`</td>
+        <td>Embedded without storage access</td>
+        <td>`false`</td>
+        <td>No access to 1P `example.com` storage.</td>
+    </tr>
+    <tr>
+        <td>`https://sites.example.com/a`</td>
+        <td>N/A</td>
+        <td>`false`</td>
+        <td>URL matches the `sites.example.com/` exclusion rule.</td>
+    </tr>
+    <tr>
+        <td>`https://app.example.com/static/index.html`</td>
+        <td>N/A</td>
+        <td>`false`</td>
+        <td>URL matches the `*.example.com/static` exclusion rule.</td>
+    </tr>
+  </table>
+
+</div>
