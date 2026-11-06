@@ -12,128 +12,93 @@ This proposal is an early design sketch by Google to describe the problem below 
 
 ## Introduction
 
-Device Bound Session Credentials (DBSC) provides cryptographic protection against off-device cookie theft by binding sessions to a user's device. Currently, DBSC relies on asynchronous HTTP headers for session initialization.
+[Device Bound Session Credentials](https://w3c.github.io/webappsec-dbsc/) (DBSC) protects sessions against off-device cookie theft by binding them to a cryptographic key on the user's device. Today, a server starts session setup through an HTTP response header, and the browser generates keys and registers the session in the background.
 
-This asynchronous nature creates an observability gap for websites, especially Identity Providers that require deterministic guarantees of session establishment before granting access.
+Because registration runs in the background, scripts on the page cannot tell when a session finishes registering, whether setup failed, or which bound sessions already exist. Identity Providers and security-sensitive applications often need that information before redirecting a user or sending authenticated requests.
 
-This explainer proposes a new JavaScript API that provides a synchronization mechanism for websites to wait for DBSC registrations.
+This explainer proposes a JavaScript API that lets websites wait for pending DBSC registrations and inspect active sessions.
 
 ## Non-goals
 
-- Deprecating header-based flows: The HTTP header mechanism will remain fully supported and is not being replaced by this API.
-- Insecure contexts: DBSC is inherently designed for secure contexts. Exposing this API in non-[secure contexts](https://www.w3.org/TR/secure-contexts/) is explicitly out of scope.
+- Deprecating header-based flows: This API complements the HTTP header mechanism and does not replace it.
+- Insecure contexts: DBSC only works in [secure contexts](https://www.w3.org/TR/secure-contexts/), so exposing this API elsewhere is out of scope.
+- Server-side telemetry: Passive error logging for background refreshes and session terminations belongs in the main DBSC specification (for example using the Reporting API).
 
 ## Use cases
 
 ### SSO handoffs
 
-In an SSO ecosystem, the Identity Provider (IdP) completing a login flow typically redirects the user back to a Relying Party (RP). This often happens before the IdP's own DBSC session gets registered on the device. An IdP can use this API to display a loading state, wait for the registration to complete, and *then* execute the redirect.
+In an SSO flow, an Identity Provider (IdP) completing sign-in redirects the user back to a Relying Party (RP). Without coordination, that redirect often fires before the IdP's own DBSC session finishes registering on the device.
 
-This allows the RP to rely on the existence of a trusted IdP key to establish a [federated DBSC session](https://w3c.github.io/webappsec-dbsc/#federated-sessions) or leverage the upcoming [DBSC for SSO](https://github.com/WICG/dbsc-sso).
+With this proposal, an IdP can show a loading state, wait for registration to finish (or handle an error), and then redirect. On later visits, the IdP can also check whether a bound session already exists. That lets the RP rely on an established IdP key for a [federated DBSC session](https://w3c.github.io/webappsec-dbsc/#federated-sessions) or [DBSC for SSO](https://github.com/WICG/dbsc-sso).
 
-### Synchronous cookie issuance
+### Coordinating bound cookie issuance
 
-When a user authenticates, the server initiates DBSC registration but may initially issue less secure cookies. Using this API, the webpage awaits confirmation that the DBSC session is registered. Once confirmed, the page requests fully privileged, device-bound authentication cookies. This simplifies authentication and closes the gap where cookies can be exfiltrated by local malware.
+During sign-in, the server starts DBSC registration, and the registration endpoint sets the bound authentication cookie once key setup completes. Because authentication cookies are typically `HttpOnly`, page scripts cannot check `document.cookie` to see when they arrive.
+
+This proposal lets the page wait until the bound session is ready before sending sensitive requests, or fall back if registration fails. Sites no longer need temporary unbound cookies during setup.
 
 ### Developer interest
 
-External developers have actively requested synchronous observability on the main W3C WebAppSec DBSC repository (w3c/webappsec-dbsc#117, w3c/webappsec-dbsc#176, w3c/webappsec-dbsc#223): Developers building client-heavy applications note that the asynchronous nature of the header-based API creates race conditions. They explicitly requested capability detection and a way to wait for registrations to complete before firing subsequent authentication requests.
+External developers have asked for client-side observability on the main DBSC repository (w3c/webappsec-dbsc#117, w3c/webappsec-dbsc#176, w3c/webappsec-dbsc#223). Teams building client-heavy applications report race conditions when HTTP headers start session setup in the background. They asked for capability detection and a way to wait for registrations before sending authenticated requests.
 
 ## Potential Solution
 
-The API provides a synchronization mechanism to learn about registration attempts and existing sessions.
+We propose adding `navigator.deviceBoundSessions` on `Window` with two Promise-based methods:
 
-### Past events visibility
+- `waitForRegistrations(options)` waits for pending registrations on the current `Document` and resolves with the registration outcomes recorded on that `Document`.
+- `getSessions()` resolves with the active DBSC sessions visible to the calling script.
 
-A navigation response may contain DBSC registration headers. Scripts on the resulting page might miss such events if our API relies on a strict push-based model, like `EventTarget`. We must therefore grant visibility into past events, and propose to use a new Observer class for this.
-
-This functionality is inspired by the [report buffer of `ReportingObserver`](https://www.w3.org/TR/reporting-1/#observers). We borrow the term "buffer" for consistency.
-
-We expect virtually all use cases to want this buffering capability, so the observer always reports buffered events. Observing does not drain or clear the buffer. `takeRecords()` does.
-
-### Querying sessions
-
-An established DBSC session is identified by a unique string (`session identifier`) on a [registrable domain](https://url.spec.whatwg.org/#host-registrable-domain). Browsers store additional metadata about these sessions. Websites must be able to list active sessions. This allows the page to learn more details about a session.
-
-Instead of a separate synchronous method, and given the observer's buffer capability, we can consolidate this feature into the observer itself: the observer also reports existing sessions.
-
-Here is an example of how to query existing sessions:
+Websites can check `navigator.deviceBoundSessions` to detect browser support:
 
 ```js
-if (typeof DeviceBoundSessionsObserver === "undefined") return;
-
-const callback = (reports, observer) => {
-  reports.forEach((report) => {
-    const session = report.type === 'session' ? report : report.session;
-    if (session?.refreshUrl === 'https://example.com/refreshFoo') {
-      // Inspect report.sessionId etc.
-    }
-  });
-}
-
-new DeviceBoundSessionsObserver(callback).observe();
+if (!navigator.deviceBoundSessions) return;
 ```
 
-This code will match a session whose refresh URL is `https://example.com/refreshFoo`, presented as either a `session` or `registration` report. If sessions exist, the code runs immediately. It runs again when a registration successfully creates a new session or overwrites one.
+### Waiting for registrations
 
-This is an example `session` report:
+Servers start DBSC registrations through the [`Secure-Session-Registration`](https://w3c.github.io/webappsec-dbsc/#header-secure-session-registration) HTTP response header. That header can arrive on a navigation response (including redirects leading to the page) or on a subresource request (such as `fetch()`).
 
-```json
-{
-  "type": "session",
-  "sessionOrigin": "https://example.com",
-  "sessionId": "foo",
-  "refreshUrl": "https://example.com/refreshFoo",
-  "creationTime": 1780493529912
+`waitForRegistrations()` waits until in-flight registrations for the `Document` finish. It then resolves with an array of registration outcomes recorded on that `Document`, sorted by their `endTime`. When no registrations are in flight, it resolves right away with any buffered outcomes on the `Document`, or `[]` if none happened.
+
+With an inline `fetch()`, scripts await the response first so the registration has already started when `waitForRegistrations()` runs:
+
+```js
+const response = await fetch('/start-dbsc');
+if (!response.ok) return;
+
+const attempts = await navigator.deviceBoundSessions.waitForRegistrations();
+if (attempts.at(-1)?.success) {
+  // Proceed with authenticated requests or SSO redirect
+} else {
+  // Handle registration failure or missing registration header
 }
 ```
 
-All time durations and timestamps are in milliseconds for consistency.
-All URLs in reports are serialized as fully resolved, absolute URLs.
+The browser records the registration as in-flight when processing response headers, before the `fetch()` promise resolves. This ensures that `waitForRegistrations()` either sees a finished registration or waits for it. For simplicity, the browser ignores headers processed after a `waitForRegistrations()` call, even if they occur before its promise resolution.
 
-### Registration attempts
+On a navigation landing page (for example `POST /login` redirecting to `/handoff`), scripts call `waitForRegistrations()` directly on load. The browser buffers outcomes from the navigation request and its redirects on the resulting `Document`, so scripts do not miss fast registrations that finished before JavaScript ran.
 
-DBSC registration attempts are triggered by HTTP headers. They may result from a local `fetch()` call, but also a navigation response, a subresource fetch, etc.
+In a Single Page Application, earlier registrations may already sit in the `Document` buffer. Scripts can record `Date.now()` before `fetch()` and filter for outcomes with a newer `endTime`.
 
-A simple use case with an inline fetch would look like this:
-
-```js
-const callback = (reports, observer) => {
-  reports.forEach((report) => {
-    if (
-      report.type === 'registration' &&
-      report.registrationUrl === 'https://id.example.com/register'
-    ) {
-      observer.disconnect();
-      if (report.success) {
-        // Finish the authentication flow or proceed with SSO redirects
-      } else {
-        // Handle the registration failure
-      }
-    }
-  });
-};
-
-new DeviceBoundSessionsObserver(callback).observe();
-// Fetch a Secure-Session-Registration header
-await fetch('https://id.example.com/start-dbsc');
-```
-
-Below are examples of typical successful and failed `registration` reports. Success reports include the resulting `session` report, which is not reported separately to that observer instance. Failure reports contain more details about the reason.
+Below are examples of successful and failed registration outcomes:
 
 ```json
 {
-  "type": "registration",
   "registrationUrl": "https://id.example.com/register",
   "endTime": 1780493529912,
   "success": true,
-  "session": { }
+  "session": {
+    "sessionOrigin": "https://id.example.com",
+    "sessionId": "foo",
+    "refreshUrl": "https://id.example.com/refreshFoo",
+    "creationTime": 1780493529912
+  }
 }
 ```
 
 ```json
 {
-  "type": "registration",
   "registrationUrl": "https://id.example.com/register",
   "endTime": 1780493529912,
   "success": false,
@@ -142,142 +107,148 @@ Below are examples of typical successful and failed `registration` reports. Succ
 }
 ```
 
-Certain DBSC registration headers cause an attempt to [federate](https://w3c.github.io/webappsec-dbsc/#federated-sessions). The corresponding registration report, successful or not, includes the `provider URL` and `provider session id` from the header.
+DBSC also supports [federated sessions](https://w3c.github.io/webappsec-dbsc/#federated-sessions) that share an existing provider key. For those attempts, the outcome object (successful or not) includes `providerUrl` and `providerSessionId` from the registration header.
+
+All timestamps use milliseconds since the Unix epoch, and all URLs are absolute.
 
 ### Timing out
 
-Due to the complex and networked nature of DBSC, placing an upper bound on the observing time will be extremely commonplace. Instead of forcing developers to use a separate mechanism, we propose to make `AbortSignal` a first-class citizen of this API. This would be an additional option passed to the constructor:
+Registration involves key operations and a network request, so callers will often bound how long they wait. `waitForRegistrations()` accepts an `AbortSignal` and rejects if the signal aborts:
 
 ```js
-const timeoutSignal = AbortSignal.timeout(3000);
-timeoutSignal.addEventListener('abort', () => { /* ... */ });
-const dbscObserver = new DeviceBoundSessionsObserver(
-  (reports, observer) => { /* ... */ },
-  { signal: timeoutSignal },
-)
-```
-
-This allows developers to use an `AbortController` and link not only timeouts but also user cancellation, navigation, etc.
-
-## Detailed design discussion
-
-### Open question: Session termination report
-
-The observer could report session termination events and their reason. This may be useful, although some of this information is already available to websites through DBSC [debug headers](https://w3c.github.io/webappsec-dbsc/#header-secure-session-skipped).
-
-For example:
-
-```json
-{
-  "type": "termination",
-  "sessionOrigin": "https://example.com",
-  "sessionId": "foo",
-  "refreshUrl": "https://example.com/refreshFoo",
-  "creationTime": 1780493529912,
-  "terminationTime": 1780493529912,
-  "reason": "unreachable"
+try {
+  const attempts = await navigator.deviceBoundSessions.waitForRegistrations({
+    signal: AbortSignal.timeout(3000),
+  });
+  if (attempts.at(-1)?.success === false) {
+    // Handle fast registration failure
+  }
+} catch (err) {
+  // Timed out or aborted via AbortController
 }
 ```
 
-Such reports would have the same visibility as the now-terminated session.
+First-class `AbortSignal` support lets callers link timeouts with user cancellation or custom `AbortController` logic. This signal only cancels the wait, not any underlying registrations.
+
+### Querying active sessions
+
+Each established DBSC session has a unique "identifier" on its [registrable domain](https://url.spec.whatwg.org/#host-registrable-domain) (the session's "origin"). On later pages, websites can call `getSessions()` to list active sessions visible to the script (`[]` if none exist):
+
+```js
+const sessions = await navigator.deviceBoundSessions.getSessions();
+const match = sessions.find(
+  (s) => s.sessionId === 'target-session'
+);
+if (match) {
+  // Inspect match.creationTime, match.refreshUrl, etc.
+}
+```
+
+Each session entry has the following shape:
+
+```json
+{
+  "sessionOrigin": "https://example.com",
+  "sessionId": "foo",
+  "refreshUrl": "https://example.com/refreshFoo",
+  "creationTime": 1780493529912
+}
+```
+
+## Detailed design discussion
+
+### Cross-page registration visibility
+
+The browser retains registration outcomes only on the `Document` where they happened (plus redirects leading to that `Document`). In practice, a page that triggers registration waits for the result before navigating away, and later pages can check established sessions through `getSessions()`. If a multi-page flow needs to pass failure details across navigations, scripts can already coordinate through `sessionStorage`. Keeping the built-in buffer per-`Document` avoids persistent storage management, and we could add an opt-in cross-page option later if needed.
+
+### Filtering options
+
+`waitForRegistrations()` waits on all in-flight registrations for the `Document`, since pages rarely run more than one DBSC registration at once. We can add optional filters (such as `registrationUrl` or a `since` timestamp) later without breaking existing code.
 
 ### Web Workers
 
-We could not find convincing use cases involving both DBSC and Web Workers. We therefore propose not allowing `DeviceBoundSessionsObserver` in Web Workers at all.
+We have not found clear use cases combining DBSC with Web Workers, so we propose exposing `navigator.deviceBoundSessions` on `Window` only.
 
 ## Considered alternatives
 
 ### Server-side HTTP polling
 
-Today the only practical alternative to this API is for websites to implement HTTP polling. This ad-hoc check lets the server-side confirm the DBSC registration through cookies. This was rejected due to:
+Today, websites without a client API must poll an HTTP endpoint so the server can check whether bound cookies have arrived. We rejected this approach for three reasons:
 
-- Implementation complexity: Requires bespoke state management on both client and server.
-- Performance overhead: Continuous polling consumes unnecessary network traffic, device battery, and server resources.
-- Lack of standardization: Prevents a unified approach to session state management across the web.
+- Implementation complexity: Requires custom state tracking on both client and server.
+- Performance overhead: Repeated polling wastes network requests, battery, and server capacity.
+- Lack of standardization: Forces each site to build its own coordination protocol.
+
+### Observer-based API
+
+We considered a dedicated observer class (modeled on `PerformanceObserver` or `ReportingObserver`) that delivers session and registration records through a callback. We chose Promise-based methods instead for two reasons:
+
+- DBSC registrations happen rarely, typically once during sign-in. Callback observers suit continuous event streams, whereas Promises fit a low-volume, one-shot wait.
+- Waiting once during sign-in or listing active sessions required extra boilerplate to disconnect the observer and wire up timeouts.
+
+### Reporting API (`ReportingObserver`)
+
+We also considered surfacing registration events through `ReportingObserver`. However, the JavaScript side of the Reporting API exists for analytics and monitoring scripts that cannot set HTTP reporting headers, not for driving live sign-in flows. `ReportingObserver` also lacks `AbortSignal` support, cannot list established sessions on later pages, and silently ignores unknown report types on browsers without DBSC support.
 
 ### Integration with Credential Management API
 
-`navigator.credentials` already handles WebAuthn, FedCM, and password managers. It might seem intuitive to add DBSC to this namespace. However, session authentication is fairly independent from user identity: many sessions don't have an identity associated (e.g. intermediate sessions during sign-in flows, carts in shopping, or guest checkout flows).
-
-Also, overloading arguments to `navigator.credentials.get` would make that API more complex, and `navigator.credentials.newDbscObserver` would be confusing. We argue that a global-scope constructor fits the DBSC use cases better.
+`navigator.credentials` handles WebAuthn, FedCM, and password managers. Session binding is separate from user identity, though: many sessions have no user identity attached (such as pre-login flows, shopping carts, or guest checkouts). Overloading `navigator.credentials` would complicate both surfaces, so a separate `navigator.deviceBoundSessions` object fits better.
 
 ### Synchronous getter (`getExistingSessions()`)
 
-Using a synchronous getter and event listener is a common JS pattern. For example:
+We considered a synchronous `navigator.deviceBoundSessions.getExistingSessions()` method. Browsers typically store DBSC state in a separate network process or on disk, so reading it synchronously from the main thread would require blocking cross-process calls or replicating state into every renderer. An asynchronous `getSessions()` method avoids blocking the main thread.
 
-```js
-if (document.readyState === 'complete') {
-  doSomething();
-} else {
-  window.addEventListener('load', () => doSomething());
-}
-```
-
-Instead of using the observer for all operations we could extend the user agent `Navigator` interface. For DBSC, the pattern above would become:
-
-```js
-// Synchronously list all visible sessions
-const sessions = navigator.deviceBoundSessions.getExistingSessions();
-if (hasSessionOfInterest(sessions)) {
-  // Proceed
-} else {
-  new DeviceBoundSessionsObserver(/* ... */).observe();
-}
-```
-
-We feel this dual interface is not needed for our primary use case of synchronizing actions with registration events. In addition, this synchronous getter may encourage developers to rely on JavaScript to detect DBSC sessions in other scenarios. In such cases a server-side decision based on bound cookies is often better, as it's much more robust and secure. See also [this section about malicious browser extensions](#malicious-browser-extensions).
-
-Developers who truly need to only list existing sessions can still use the observer, although it's a more cumbersome setup.
-
-### async / await registration query
-
-The [first code example](#registration-attempts) of this proposal would arguably be more ergonomic if scripts could simply await a Promise. An initial draft proposed a Promise-returning `navigator.deviceBoundSessions.waitForRegistrations()` that would resolve once all pending registrations finish. It would also automatically include buffered events, reporting a status list of all past registrations. This is less in line with modern APIs and seems like a generally worse developer experience.
+Sites checking whether a user is authenticated should still verify bound cookies on the server rather than relying on client-side checks. See [Malicious browser extensions](#malicious-browser-extensions).
 
 ### Registration trigger (`start()`)
 
-We considered an active registration API (e.g. `navigator.deviceBoundSessions.start()`) to initiate registrations purely via JS instead of HTTP headers. We think this part of the API is not needed:
+We considered a method such as `navigator.deviceBoundSessions.start()` to start registrations directly from JavaScript without HTTP headers, and decided against it:
 
-- Redundancy: The proposed read-only API combined with a `fetch()` call is functionally very similar to a dedicated `start()` method, making its added value minimal.
-- Security risks: Exposing the cryptographic challenge directly to the JS environment introduces risks. A malicious browser extension could intercept the challenge, block the registration, and complete it with its own exportable private key.
-  - We could mitigate this attack by mandating a challenge-issuing endpoint called by the browser itself (see w3c/webappsec-dbsc#176). But that approach does not make the serving setup significantly simpler, comes with security caveats, and strengthens the redundancy argument above.
-
-### Alternative registration attempts visibility
-
-Our [scope proposal below](#buffer-scope) ties registration events to `localStorage`. Attempts could instead have a more restricted, Document-like scope. Statuses would only be retained in the Environment Settings Object that triggered the registration request. This sidesteps most race condition and privacy concerns but also prevents multi-page use cases requiring details about past registration attempts.
+- Redundancy: Combining `fetch()` with `waitForRegistrations()` already covers script-initiated flows.
+- Security risks: Passing the cryptographic challenge through JavaScript lets a malicious extension intercept the challenge and register its own exportable key instead. Requiring a separate browser-fetched challenge endpoint (see w3c/webappsec-dbsc#176) would undo most of the simplicity benefit.
 
 ### Exposing all session details
 
-We think it's unnecessary and unwise to expose certain details about a session. For example, reporting a session's public key might prompt a site to rely on this capability for challenge verification, which would expose their sessions to a range of attacks.
+Exposing fields like a session's public key could tempt sites to verify challenges against client-reported keys, which would open sessions to key-substitution attacks. We limit session objects to non-cryptographic metadata.
 
 ## Security and Privacy Considerations
 
-Since this API exposes cryptographic session states, we suggest enforcing strict boundaries.
-
 ### Secure contexts
 
-The observer is only available over [Secure Contexts](https://www.w3.org/TR/secure-contexts/), like the rest of DBSC.
+`navigator.deviceBoundSessions` is only available in [Secure Contexts](https://www.w3.org/TR/secure-contexts/), like the rest of DBSC.
+
+### Visibility and scoping
+
+The API enforces two boundaries so scripts only see session state that matches cookie access:
+
+#### Active sessions
+
+DBSC defines how to [identify if a URL is in scope](https://w3c.github.io/webappsec-dbsc/#algo-url-in-scope). `getSessions()` (and the `session` field on a registration outcome) includes a session only when the script's URL is in scope or matches the session's refresh URL.
+
+Cross-site frames with partitioned storage must call the Storage Access API before reading unpartitioned DBSC session data. Scope exclusion rules (such as `{ "type": "exclude", "domain": "untrusted.example.com", "path": "/" }`) also hide sessions from excluded subdomains and paths.
+
+#### Registration attempts
+
+The browser keeps registration outcomes in memory on the `Document` that triggered them (including redirects leading to that `Document`), and only when the `Document` is `same-origin` with `registrationUrl`. This way, cross-site pages and subdomains cannot observe or time another origin's registrations.
+
+When the browser blocks third-party cookies, unprivileged third-party iframes cannot establish an unpartitioned DBSC session in the first place, but they are allowed to see their own failed attempt.
+
+On success, the `session` field appears only when the new session passes the active-session check above. This is just an ergonomic consideration, as subsequent `getSessions()` calls would not return out-of-scope sessions.
+
+> [!NOTE]
+> Performing a scope check before populating a successful registration attempt's `session` complicates the following use case: When `login.example.com` registers several sessions for `app.example.com`, the registering origin cannot differentiate the resulting sessions.
+
+Browsers should cap the size of this per-`Document` list and discard it on unload.
 
 ### Tracking vectors
 
-This API does not introduce additional surfaces for user tracking. This proposal helps with SSO handoffs but does not bypass third-party cookie restrictions or cross-site tracking protections. The underlying identity federation still relies on standard platform capabilities (e.g. FedCM, OAuth redirects).
+This API adds no cross-site tracking surfaces and does not bypass third-party cookie restrictions. SSO flows still rely on standard browser mechanisms such as OAuth redirects or FedCM.
 
-DBSC itself also [respects cookie policies](https://w3c.github.io/webappsec-dbsc/#privacy-cookies). For example, a registration cannot succeed when it is not allowed to set any of the cookies referenced by the new DBSC session. This API similarly blocks access to DBSC information in contexts where the DBSC cookies do not apply. An existing session's details must likewise not be readable by scripts when its cookies would not be included in a request.
-
-Sessions and keys [must be deleted](https://w3c.github.io/webappsec-dbsc/#privacy-considerations) alongside cleared site data, making them unavailable for lookup past their lifetime.
-
-Registration error statuses stay high-level and simple, to avoid new device fingerprinting avenues.
-
-### Buffer scope
-
-As stated in the previous section, the API does not introduce additional tracking avenues. The reports buffer is no exception, and does not add cross-page or cross-site communication. In other words, the buffer doesn't reveal information that scripts cannot already share using other storage APIs, such as `localStorage` or `IndexedDB`.
-
-Browsers should also put a reasonable limit on the number of attempts stored in each buffer and their time-to-live. This prevents privacy and memory issues, especially in long-lived Single Page Applications or background tabs.
-
-[This document](buffer-visibility.md) goes into more technical details about how we might achieve such a guarantee.
+DBSC [respects cookie policies](https://w3c.github.io/webappsec-dbsc/#privacy-cookies), and browsers [must delete sessions and keys](https://w3c.github.io/webappsec-dbsc/#privacy-considerations) when users clear site data. Error reasons stay coarse-grained, and browsers monotonically coarsen `creationTime` and `endTime` to prevent hardware timing side-channels across security chips.
 
 ### Malicious browser extensions
 
-A malicious browser extension may tamper with JavaScript objects and fake all API return values. This could lead to a Denial of Service (DoS). A number of bespoke measures, such as using `HttpOnly` cookies, can help build confidence that the server is interacting with a browser-originated request. Sites that deem this unacceptable can fall back to the headers-based protocol, though we should note this is also susceptible to other DoS attacks.
+A malicious browser extension can tamper with JavaScript objects and fake API return values, which can cause a client-side Denial of Service (DoS). Protections such as `HttpOnly` bound cookies still help the server verify browser-originated session proofs. Sites that cannot accept JavaScript tampering can stick to the header-only DBSC protocol, although extensions can disrupt network flows in other ways too.
 
 ## Stakeholder Feedback / Opposition
 
@@ -292,4 +263,5 @@ Many thanks for valuable feedback and advice from:
 - Daniel Margolis
 - Daniel Rubery [@drubery](https://github.com/drubery)
 - Lucas Santos [@lucasrsant](https://github.com/lucasrsant)
+- Martin Thomson [@martinthomson](https://github.com/martinthomson)
 - Nina Satragno [@nsatragno](https://github.com/nsatragno)
