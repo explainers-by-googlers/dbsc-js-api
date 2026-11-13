@@ -4,7 +4,7 @@
 
     This API exposes the status of active Device Bound Session Credentials (DBSC) sessions and per-document registration attempts:
 
-    - Session metadata for visible active sessions: `sessionOrigin`, `sessionId`, `refreshUrl`, and `creationTime`.
+    - Session metadata for visible active sessions: `sessionId`, `refreshUrl`, and `creationTime`.
     - Per-document registration outcomes: `registrationUrl`, `success`, `endTime`, coarse `reason` strings and HTTP status `code` on failure, `providerUrl` and `providerSessionId` for federated attempts, and the resulting `session` metadata when visible.
 
     It does not expose public or private key material, cookie names or values, hardware serial numbers, or stable device identifiers.
@@ -13,7 +13,7 @@
 
 2. Do features in your specification expose the minimum amount of information necessary to implement the intended functionality?
 
-    Yes. Session identifiers, origins, and refresh URLs let sites identify active sessions without exposing cookie credentials or cryptographic keys. Registration outcomes stay limited to same-origin attempts on the current `Document`.
+    Yes. Session identifiers and refresh URLs let sites identify active sessions without exposing cookie credentials or cryptographic keys. Registration outcomes stay limited to same-origin attempts on the current `Document`.
 
 3. Do the features in your specification expose personal information, personally-identifiable information (PII), or information derived from either?
 
@@ -29,7 +29,7 @@
 
 6. Do the features in your specification introduce state that persists across browsing sessions?
 
-    Not beyond what the core DBSC specification already stores. `getSessions()` reads existing DBSC session metadata, which browsers must delete whenever the user clears cookies or site data for that origin (avoiding "zombie cookie" tracking). `waitForRegistrations()` keeps registration outcomes only in ephemeral per-`Document` memory. Browsers discard that memory on unload and never persist it across navigations or restarts.
+    Not beyond what the core DBSC specification already stores. `getSessions()` reads existing DBSC session metadata, which browsers must delete whenever the user clears cookies or site data for that origin (avoiding "zombie cookie" tracking). `waitForRegistrations()` keeps registration outcomes only in ephemeral per-`Document` memory. Browsers discard that memory when the `Document` is destroyed and never persist it across navigations or restarts.
 
 7. Do the features in your specification expose information about the underlying platform to origins?
 
@@ -81,11 +81,11 @@
 
 19. What happens when a document that uses your feature gets disconnected?
 
-    When a `Document` becomes inactive or is destroyed, the browser discards its registration buffer and scripts in that context cannot resolve new session or registration queries.
+    Calling `getSessions()` or `waitForRegistrations()` on a `Document` that is not fully active (such as a detached `iframe`) rejects with an `"InvalidStateError"` `DOMException`. When a `Document` is destroyed, the browser discards its pending and buffered registrations and rejects any pending `waitForRegistrations()` promises with an `"AbortError"` `DOMException`.
 
 20. Does your spec define when and how new kinds of errors should be raised?
 
-    `waitForRegistrations()` rejects with the `AbortSignal`'s abort reason when aborted (for example `TimeoutError`). Protocol-level DBSC registration failures resolve with `success: false` and coarse-grained `reason` categories to avoid hardware profiling.
+    Both methods reject with an `"InvalidStateError"` `DOMException` when called on a `Document` that is not fully active. `waitForRegistrations()` rejects with the `AbortSignal`'s abort reason when aborted (for example `TimeoutError`), or with an `"AbortError"` `DOMException` if its `Document` is destroyed while waiting. Protocol-level DBSC registration failures resolve with `success: false` and coarse-grained `reason` categories to avoid hardware profiling.
 
 21. Does your feature allow sites to learn about the user's use of assistive technology?
 
