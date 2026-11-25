@@ -79,7 +79,7 @@ The browser records the registration as in-flight when processing response heade
 
 On a navigation landing page (for example `POST /login` redirecting to `/handoff`), scripts call `waitForRegistrations()` directly on load. The browser buffers outcomes from the navigation request and its redirects on the resulting `Document`, so scripts do not miss fast registrations that finished before JavaScript ran.
 
-In a Single Page Application, earlier registrations may already sit in the `Document` buffer. Scripts can record `Date.now()` before `fetch()` and filter for outcomes with a newer `endTime`.
+In a Single Page Application, earlier registrations may already sit in the `Document` buffer. Scripts can record `Date.now()` before `fetch()` and filter for outcomes with an `endTime` at or after that timestamp.
 
 Below are examples of successful and failed registration outcomes:
 
@@ -89,7 +89,6 @@ Below are examples of successful and failed registration outcomes:
   "endTime": 1780493529912,
   "success": true,
   "session": {
-    "sessionOrigin": "https://id.example.com",
     "sessionId": "foo",
     "refreshUrl": "https://id.example.com/refreshFoo",
     "creationTime": 1780493529912
@@ -132,7 +131,7 @@ First-class `AbortSignal` support lets callers link timeouts with user cancellat
 
 ### Querying active sessions
 
-Each established DBSC session has a unique "identifier" on its [registrable domain](https://url.spec.whatwg.org/#host-registrable-domain) (the session's "origin"). On later pages, websites can call `getSessions()` to list active sessions visible to the script (`[]` if none exist):
+Each established DBSC session has a unique "identifier" on its [registrable domain](https://url.spec.whatwg.org/#host-registrable-domain). On later pages, websites can call `getSessions()` to list active sessions visible to the script (`[]` if none exist):
 
 ```js
 const sessions = await navigator.deviceBoundSessions.getSessions();
@@ -148,7 +147,6 @@ Each session entry has the following shape:
 
 ```json
 {
-  "sessionOrigin": "https://example.com",
   "sessionId": "foo",
   "refreshUrl": "https://example.com/refreshFoo",
   "creationTime": 1780493529912
@@ -238,13 +236,13 @@ On success, the `session` field appears only when the new session passes the act
 > [!NOTE]
 > Performing a scope check before populating a successful registration attempt's `session` complicates the following use case: When `login.example.com` registers several sessions for `app.example.com`, the registering origin cannot differentiate the resulting sessions.
 
-Browsers should cap the size of this per-`Document` list and discard it on unload.
+Browsers should cap the size of this per-`Document` list and discard it when the `Document` is destroyed.
 
 ### Tracking vectors
 
 This API adds no cross-site tracking surfaces and does not bypass third-party cookie restrictions. SSO flows still rely on standard browser mechanisms such as OAuth redirects or FedCM.
 
-DBSC [respects cookie policies](https://w3c.github.io/webappsec-dbsc/#privacy-cookies), and browsers [must delete sessions and keys](https://w3c.github.io/webappsec-dbsc/#privacy-considerations) when users clear site data. Error reasons stay coarse-grained, and browsers monotonically coarsen `creationTime` and `endTime` to prevent hardware timing side-channels across security chips.
+DBSC [respects cookie policies](https://w3c.github.io/webappsec-dbsc/#privacy-cookies), and browsers [must delete sessions and keys](https://w3c.github.io/webappsec-dbsc/#privacy-considerations) when users clear site data. Error reasons stay coarse-grained, and browsers coarsen `creationTime` and `endTime` to integer milliseconds (and may clamp registration completion timing) to prevent hardware timing side-channels across security chips.
 
 ### Malicious browser extensions
 
